@@ -1,0 +1,939 @@
+---
+title: "Costea2017 analysis"
+author: Michael McLaren
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    self_contained: true
+    highlight: tango
+---
+
+# R setup 
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(progress = TRUE, verbose = TRUE)
+# Global chunk options
+knitr::opts_chunk$set(
+    cache = TRUE, autodep = TRUE,
+    include = TRUE, echo = TRUE,
+    warning = TRUE, message = FALSE, 
+    fig.width = 6, fig.height = 4
+)
+```
+
+Run with `SAVE_FIGURES = TRUE` to save figures in `figures/`. 
+```{r}
+SAVE_FIGURES = FALSE
+fig_path <- file.path(here::here(), "figures")
+```
+
+## Libraries and paths
+
+```{r load_packages}
+library(tidyverse)
+library(ggthemes)
+library(cowplot)
+library(ggbeeswarm)
+# This package
+devtools::load_all(here::here())
+```
+
+## Plot setup
+
+Options for `ggplot`:
+```{r}
+base_theme <- theme_tufte() + 
+    theme(
+        text = element_text(size=9, family = ""),
+        legend.position = "none"
+        )
+base_theme0 <- theme_grey() + 
+    theme(
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank()
+        )
+tax_theme <- theme(
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1), 
+        axis.title.x = element_blank())
+
+update_geom_defaults("point", list(size = 1))
+update_geom_defaults("text", list(size = 2.5))
+update_geom_defaults("hline", list(color = "grey"))
+```
+
+```{r}
+costea.shape_scale <- scale_shape_manual(
+    breaks = c("I", "M"), 
+    values = c(16, 1),
+    labels = c("Fecal", "Mock only"))
+
+colors.protocol <- scales::hue_pal()(3)
+# costea.protocol <- c("H" = "#F8766D", "Q" = "#00BA38", "W" = "#619CFF")
+# names(colors.protocol) <- c("H", "Q", "W")
+# Or, to match the Costea paper:
+names(colors.protocol) <- c("W", "H", "Q")
+colors.protocol <- c(colors.protocol, Actual = "black")
+```
+
+# Data setup
+
+Sample metadata:
+```{r}
+data("costea2017_sample_data")
+sam <- costea2017_sample_data
+sam
+```
+Expected mock community composition, obtained from the supplementary data (see
+`data-raw/costea2017.R`)
+```{r}
+data("costea2017_mock_composition")
+mock <- costea2017_mock_composition
+```
+The FACS measurements are the "bacterial cells" columns; the measurements
+without endospores were used as the actual composition, and replicate
+measurements were averaged (personal communication with Paul Costea); 
+```{r}
+mock <- mock %>%
+    select(Taxon, FACS = "bacterial cells in spike in Mix") %>%
+    group_by(Taxon) %>%
+    summarize_at(vars(FACS), mean)
+mock <- mock %>%
+    arrange(desc(FACS))
+mock
+```
+Note the difference in order for three species from Costea2017 Figure 6. None
+of the available columns give the ordering seen in their figure, indicating a
+mislabeling in the figure or in the provided spreadsheet. However, the
+mislabeling does not affect our main conclusions; we can analyze the data as if
+the spreadsheet is correct.
+
+Metaphlan2 profiles:
+```{r}
+data("costea2017_metaphlan2_profiles")
+profiles <- costea2017_metaphlan2_profiles
+profiles %>% corner
+```
+The samples are named here by their ENA run accession; let's rename to the
+new sample names.
+```{r}
+new_names <- c("Clade", 
+    sam$Sample[match(colnames(profiles)[-1], sam$Run_accession)])
+colnames(profiles) <- new_names
+```
+
+Two samples, QA and QB, are two extra fecal samples that were only sequenced by
+protocol Q and so we won't be using for our analysis. We also drop unneeded
+sample variables.
+```{r}
+sam <- sam %>%
+    filter(!(Sample %in% c("QA", "QB"))) %>%
+    select(Sample, Protocol, Individual)
+profiles <- profiles[, c("Clade", sam$Sample)]
+```
+
+Taxonomy from the metaphlan2 clade names:
+```{r}
+tax_ranks <- c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus",
+    "Species", "Strain")
+rank_letters <- c("k", "p", "c", "o", "f", "g", "s", "t")
+tax_pattern  <- paste0("(?:", rank_letters, "__(\\w+))?") %>%
+    paste(collapse = "\\|?")
+tax <- profiles %>%
+    select(Clade) %>%
+    extract(Clade, tax_ranks, regex = tax_pattern, remove = FALSE)
+tax
+```
+
+Species table:
+```{r}
+st <- profiles %>%
+    left_join(tax, by = "Clade") %>%
+    filter(!is.na(Species), is.na(Strain)) %>%
+    select(-Strain)
+st
+```
+Species names have the form `Genus_species` and are unique,
+```{r}
+st$Species %>% head
+st$Species %>% anyDuplicated
+```
+The `Genus_unclassified` catches cases where more reads were mapped to the
+genus's markers than could be accounted for by species within the genus.
+We will use these species names as taxon names,
+```{r}
+st <- st %>%
+    mutate(Clade = Species) %>%
+    rename(Taxon = Clade)
+```
+and join the metadata and tidy it into a tall format (one sample-taxon
+observation per row)
+```{r}
+st <- st %>%
+    gather("Sample", "Abundance", sam$Sample) %>%
+    left_join(sam, by = "Sample") %>%
+    select(Taxon, Sample, Abundance, colnames(sam), everything())
+st
+```
+
+Metaphlan outputs estimates of the proportions * 100. We will renormalize to
+proportions summing to 1 instead.
+```{r}
+st <- st %>%
+    mutate_by(Sample, Abundance = close_elts(Abundance))
+st %>%
+    group_by(Sample) %>%
+    summarize(sum(Abundance)) %>%
+    {summary(.[,2])}
+```
+
+Output from the various kingdoms:
+```{r}
+st %>%
+    group_by(Kingdom, Sample) %>%
+    summarize(Abundance = sum(Abundance)) %>%
+    spread(Kingdom, Abundance) %>%
+    print(n=Inf)
+```
+There is very little Archaea and Eukaryote abundance, and the vast majority of
+the viral abundance comes from a Salmonella phage that may be integrated into
+the genome of the _Salmonella enterica_ strain in the mock community.
+```{r}
+st %>%
+    filter(Kingdom == "Viruses") %>%
+    group_by(Taxon) %>% 
+    summarize(Abundance = mean(Abundance)) %>%
+    arrange(desc(Abundance))
+```
+We will therefore restrict our analysis of sample composition to just Bacteria,
+```{r}
+st0 <- st %>%
+    filter(Kingdom == "Bacteria") %>%
+    mutate_by(Sample, Abundance = close_elts(Abundance))
+```
+
+# Composition of the samples
+
+## Identifying contaminants
+
+Costea et al report seeing E coli as a putative contaminant of the spike-in. We
+can check by seeing what we find in the mock-only samples that shouldn't be
+there:
+```{r}
+st0 %>%
+    filter(
+        Individual == "M", Abundance > 0, 
+        !(Taxon %in% mock$Taxon)
+        ) %>%
+    group_by(Taxon) %>%
+    summarize(
+        Mean = mean(Abundance),
+        Max = max(Abundance),
+        ) %>%
+    arrange(desc(Mean)) %>%
+    print(n = 10)
+```
+It looks like the contaminant reads are mostly captured by `Shigella_flexneri`
+and `Escherichia_unclassified`, with possibly some as `Escherichia_coli`. 
+We will use these identifiers as putative contaminants.
+```{r}
+contaminants <- c("Shigella_flexneri", "Escherichia_unclassified",
+    "Escherichia_coli")
+```
+This may lump native reads from some native Escherichia into the contaminants,
+but that isn't important for our analysis.
+
+## Taxa by source (Mock, Contaminant, Native)
+
+Classify the taxa by source type:
+```{r}
+st0 <- st0 %>%
+    mutate(Source = case_when(
+            Taxon %in% mock$Taxon ~ "Mock", 
+            Taxon %in% contaminants ~ "Contaminant",
+            TRUE ~ "Native"
+            )
+        )
+```
+View the proportions of native, mock, and contaminant for each sample:
+```{r}
+tb.source <- st0 %>%
+    group_by(Sample, Protocol, Individual, Source) %>%
+    summarize(Abundance = sum(Abundance)) %>%
+    ungroup()
+tb.source %>%
+    spread(Source, Abundance) %>%
+    print(n=Inf)
+```
+Labeled contaminants are always a small fraction of the total sample. 
+They also appear in a consistent ratio with the mock for a given protocol
+except in samples Q2 and Q3,
+```{r, fig.width = 4.5, fig.height = 3.5}
+tb.source %>%
+    spread(Source, Abundance) %>%
+    ggplot(aes(Sample, Contaminant / Mock, color = Protocol, 
+            label = Individual)) +
+    scale_color_manual(values = colors.protocol) + 
+    geom_text() +
+    coord_flip()
+```
+
+And in these samples, the spike-in (including contaminants) makes up an
+unusually low fraction of the total (see table above), so it is perhaps not
+surprising for the ratio to be different. These facts suggest that the
+`contaminants` are largely being correctly identified.
+
+Composition by source type:
+```{r}
+p.source <- ggplot(tb.source,
+    aes(y = Abundance, 
+        x = Individual,
+        # x = factor(Individual, lvls.mock_prop), 
+        fill = Source)) +
+    geom_bar(stat = "identity") +
+    scale_y_continuous(limits=c(0,1), breaks = c(0, 0.5, 1), 
+        labels = c("0", "0.5", "1")) +
+    geom_rangeframe(data = tibble(y = c(0, 1), Protocol = "H"), 
+        aes(y = y), sides = "l", inherit.aes = FALSE) +
+    scale_fill_brewer(type = "qual") +
+    facet_grid(. ~ Protocol) +
+    labs(x = "Specimen", fill = "Taxon type", 
+        title = "Composition of different bacterial types") +
+    base_theme +
+    theme(legend.position = "right")
+p.source 
+```
+
+## Native taxa composition
+
+Get the native taxa agglomerated to the Family level,
+```{r}
+nat <- st0 %>%
+    filter(Source == "Native") %>%
+    group_by_at(vars(Sample, Protocol, Individual, Kingdom:Family)) %>%
+    summarize(Abundance = sum(Abundance)) %>%
+    ungroup
+```
+
+```{r, eval = FALSE, include = FALSE}
+ggplot(nat, aes(x = Individual, y = Abundance, fill = Family)) +
+    geom_bar(stat = "identity") +
+    scale_y_continuous(limits=c(0,1), breaks = c(0, 0.5, 1), 
+        labels = c("0", "0.5", "1")) +
+    geom_rangeframe(data = tibble(y = c(0, 1), Protocol = "H"), 
+        aes(y = y), sides = "l", inherit.aes = FALSE) +
+    facet_grid(. ~ Protocol) +
+    labs(x = "Specimen",
+        title = paste0("Composition of native bacterial taxa")
+        ) +
+    base_theme +
+    theme(legend.position = "right") +
+    labs(y = "Proportion")
+```
+
+Let's restrict to Families within a minimal abundance to simplify the figure.
+First, lets check the prevalence of various families,
+```{r}
+prev <- nat %>%
+    filter(Individual != "M") %>%
+    mutate_by(Sample, Proportion = close_elts(Abundance)) %>%
+    group_by(Family) %>%
+    summarize(Prev = sum(Proportion > 0), 
+        Min = min(Proportion), 
+        Median = median(Proportion), 
+        Mean = mean(Proportion), 
+        Max = max(Proportion))
+prev %>%
+    arrange(desc(Max)) %>%
+    print(n=30)
+```
+Let's use the families with a proportion of at least 2%.
+```{r}
+families <- prev %>%
+    filter(Max > 0.02) %>%
+    {.$Family}
+nat0 <- nat %>%
+    filter(Family %in% families) %>%
+    arrange(Phylum, Family)
+```
+
+Create a color scale for the families that also uses hue to distinguish Phyla.
+```{r}
+# Color tibble
+ctb <- nat0 %>%
+    select(Phylum, Family) %>%
+    distinct %>%
+    arrange(Phylum, Family) %>%
+    group_by(Phylum) %>%
+    nest(Family) %>%
+    rowwise() %>%
+    mutate(Families = list(unlist(data)),
+        Num = length(Families))
+ctb <- ctb %>%
+    arrange(desc(Num)) %>%
+    add_column(Palette = c("Blues", "Greens", "Reds", "Oranges"))
+ctb <- ctb %>%
+    rowwise() %>%
+    mutate(Colors = list(RColorBrewer::brewer.pal(Num, name = Palette)))
+
+last_n <- function(x, n) {
+    len <- length(x)
+    x[seq(len - n + 1, len)]
+}
+
+ctb <- ctb %>%
+    rowwise() %>%
+    mutate(Colors = list(last_n(Colors, Num)))
+
+ctb <- ctb %>%
+    select(Phylum, Families, Colors) %>%
+    unnest() %>%
+    arrange(Phylum, Families)
+
+colors.families <-  ctb$Colors
+names(colors.families) <- ctb$Families
+# RColorBrewer::display.brewer.all()
+# RColorBrewer::brewer.pal(5, name = "Blues")
+```
+
+```{r, eval = FALSE, include = FALSE}
+# Composition with new colors:
+p.nat_comp <- ggplot(nat0,
+    aes(x = factor(Individual, as.character(c(1:8, "M"))),
+        y = Abundance, 
+        fill = factor(Family, names(colors.families)))) +
+    geom_bar(stat = "identity") +
+    scale_y_continuous(limits=c(0,1), breaks = c(0, 0.5, 1), 
+        labels = c("0", "0.5", "1")) +
+    geom_rangeframe(data = tibble(y = c(0, 1), Protocol = "H"), 
+        aes(y = y), sides = "l", inherit.aes = FALSE) +
+    scale_fill_manual(values = colors.families) +
+    facet_grid(. ~ Protocol) +
+    labs(x = "Specimen",
+        title = paste0("Composition of native bacterial taxa")
+        ) +
+    base_theme +
+    theme(legend.position = "right") +
+    labs(fill = "Family", y = "Proportion")
+p.nat_comp
+```
+
+We also want the mock and contaminant fractions in the final figure
+```{r}
+comp <- bind_rows(
+    nat0,
+    tb.source %>% filter(Source != "Native") %>% rename(Family = Source)
+)
+comp %>%
+    filter(Sample == "W1") %>%
+    select(Family, Abundance) %>%
+    arrange(desc(Abundance))
+comp %>%
+    group_by(Sample) %>%
+    summarize(sum= sum(Abundance)) %>%
+    {min(.$sum)}
+colors.source <- c("#A9A9A9", "#D3D3D3")
+names(colors.source) <- c("Contaminant", "Mock")
+colors.comp <- c(colors.source, colors.families)
+```
+
+```{r, fig.height = 5}
+p.comp <- ggplot(comp,
+    aes(x = factor(Individual, as.character(c(1:8, "M"))),
+        y = Abundance, 
+        fill = factor(Family, names(colors.comp)))) +
+    geom_bar(stat = "identity") +
+    scale_y_continuous(limits=c(0,1), breaks = c(0, 0.5, 1), 
+        labels = c("0", "0.5", "1")) +
+    geom_rangeframe(data = tibble(y = c(0, 1), Protocol = "H"), 
+        aes(y = y), sides = "l", inherit.aes = FALSE) +
+    scale_fill_manual(values = colors.comp) +
+    facet_grid(. ~ Protocol) +
+    labs(x = "Specimen", y = "Proportion",
+        title = paste0("Composition of bacterial taxa")
+        ) +
+    base_theme +
+    theme(legend.position = "right", legend.key.size = unit(0.15, "in")) +
+    labs(fill = "Source or\nFamily (Native)")
+p.comp
+```
+
+# Relative abundances and bias in the mock spike-in
+
+Next, we want to visualize relative abundances vs. actual composition (bias) of
+the mock. It is useful to plot the abundance of individual taxa as their ratio
+to the geometric mean of all taxa in the sample. However, this requires that
+all taxa have a positive measured abundance, and there are a few cases where
+the rarest mock taxon Blautia hansenii is not detected:
+```{r}
+st0 %>%
+    filter(Taxon %in% mock$Taxon, Abundance == 0)
+```
+In fact, several reads were assigned to Blautia hansenii in each of these
+samples, but not enough to pass Metaphlan2's minimum abundance filter
+(Metaphlan's `clade_profiles` output, not shown).  A common way to remove zeros
+is add a pseudocount of 1 to all read counts. But Metaphlan provides estimated
+proportions rather than read counts, and as noted the detection threshold for
+Metaphlan to decide a taxon is present is greater than 1 read anyways.
+Instead, we estimate the minimum abundance threshold for each sample from the
+proportion of the rarest detected taxon, and then use this as our pseudocount
+to add to all taxa of the sample.
+```{r}
+sample_min <- st0 %>%
+    group_by(Sample) %>%
+    filter(Abundance > 0) %>%
+    summarize(Min = min(Abundance))
+sample_min$Min
+```
+We will further restrict to just the mock taxa,
+```{r}
+stm <- st0 %>%
+    filter(Taxon %in% mock$Taxon) %>%
+    left_join(sample_min, by = "Sample") %>%
+    mutate_by(Sample, Abundance = close_elts(Abundance + Min)) %>%
+    select(-Min)
+stm %>%
+    filter(Taxon == "Blautia_hansenii") %>%
+    arrange(Abundance)
+```
+Add the actual abundances, (Taking the FACS measurement to give the actual
+relative abundances), and rename Abundance to Observed.
+```{r}
+stm <- stm %>%
+    left_join(mock, by = "Taxon") %>%
+    mutate_by(Sample, Actual = close_elts(FACS)) %>%
+    rename(Observed = Abundance)
+```
+
+From now on, we will work with the geometrically centered relative abundances.
+```{r}
+stm <- stm %>%
+    mutate_by(Sample, 
+        Actual = center_elts(Actual),
+        Observed = center_elts(Observed)
+    )
+```
+
+Plot the observed and actual relative abundances.
+```{r, fig.width = 5, fig.asp = 3/4}
+p.step <- ggplot(stm,
+    aes(x = factor(Taxon, mock$Taxon), y = Observed,
+        color = Protocol, shape = (Individual == "M"))) + 
+    geom_quasirandom() +
+    geom_rangeframe(color = "black", sides = "l") +
+    scale_color_manual(values = colors.protocol) + 
+    # scale_y_log10(breaks = c(0.003, 1e-2, 1e-1, 1, 10, 30),
+    #     labels = c("3e-3", "1e-2", "0.1", "1", "10", "30")) +
+    scale_y_log10(labels = log_formatter) +
+    scale_x_discrete(labels = tax_labeller) + 
+    costea.shape_scale + 
+    scale_color_manual(values = colors.protocol) + 
+    coord_cartesian(clip = "off") +
+    labs(title = "Relative abundances of mock taxa",
+        y = "Abundance relative to geometric mean",
+    shape = "Specimen type") +
+    base_theme + 
+    tax_theme + 
+    theme(legend.position = "right")
+# Add the actual abundances (as a stair plot like in Costea2017's Figure 6)
+# underneath the data points
+tb.step <- stm %>%
+    filter(Sample == "H1") %>%
+    select(Taxon, Actual) %>%
+    mutate(x1 = rank(desc(Actual)) - 0.5, x2 = x1 + 0.5,
+        x3 = ifelse(x2 == 10, 10.5, NA)) %>%
+    gather("loc", "x", x1, x2, x3) %>%
+    filter(!is.na(x)) %>%
+    arrange(x)
+p.step$layers <- c(
+    geom_step(data = tb.step, aes(x = x, y = Actual), 
+        size = 0.3, color = "black", inherit.aes = FALSE),
+    p.step$layers)
+p.step <- p.step +
+    annotate("text", x = 10.6, y = 0.025, label = "Actual",
+        color = "black", hjust = 0)
+p.step
+```
+
+## Main text figure
+
+```{r, fig.width = 7, fig.height = 3.5}
+plot_grid(p.comp, p.step, labels = c("A", "B"))
+```
+
+```{r, include = FALSE, eval = SAVE_FIGURES}
+# ggsave(file.path(here::here(), "figures", "costea2017_2panel.svg"),
+#     width = 7, height = 3.5, units = "in", scale = 4/3)
+ggsave(file.path(here::here(), "figures", "costea2017_2panel.png"),
+    width = 7, height = 3.5, units = "in", dpi = 300, scale = 4/3)
+ggsave(file.path(here::here(), "figures", "costea2017_2panel.pdf"),
+    width = 7, height = 3.5, units = "in", scale = 4/3)
+```
+
+# Estimate bias
+
+Estimate the bias separately within each protocol using the "center" method of
+the `estimate_bias` function,
+```{r}
+bias <- stm %>%
+    group_by(Protocol) %>%
+    nest %>%
+    mutate(Bias = map(data, estimate_bias, method = "center")) %>%
+    unnest(Bias) %>%
+    rename(Bias = Bias_est)
+bias %>%
+    spread(Protocol, Bias)
+```
+The estimated bias vectors are geometrically centered by dividing by the
+geometric mean of taxa,
+```{r}
+bias %>%
+    group_by(Protocol) %>%
+    summarize(g_mean(Bias))
+```
+so that the elements (relative efficiencies) can be interpreted as the
+detection efficiency relative to the average taxon for that protocol.
+
+To confirm that our estimate is good, we can use it to calibrate the relative
+abundances in the previous figure:
+```{r, fig.width = 5, fig.asp = 3/4}
+p.step.cal <- p.step
+p.step.cal$data <- p.step.cal$data %>%
+    left_join(bias, by = c("Protocol", "Taxon")) %>%
+    mutate_by(Sample, Observed = center_elts(Observed / Bias))
+p.step.cal
+```
+
+Check that the bias predictions predict the taxon ratios:
+```{r}
+ratios <- crossing(Sample = setdiff(sam$Sample, c("QA", "QB")), 
+    Taxon.x = mock$Taxon, Taxon.y = mock$Taxon) %>%
+    left_join(stm, by = c("Sample", "Taxon.x" = "Taxon")) %>%
+    left_join(stm %>% select(Sample, Taxon, Observed, Actual), 
+        by = c("Sample", "Taxon.y" = "Taxon")) %>%
+    mutate(Pair = paste(Taxon.x, Taxon.y, sep = ":"))
+ratios <- ratios %>%
+    left_join(bias, by = c("Protocol", "Taxon.x" = "Taxon")) %>%
+    left_join(bias, by = c("Protocol", "Taxon.y" = "Taxon"))
+ratios <- ratios %>%
+    mutate(
+        Observed = Observed.x / Observed.y,
+        Actual = Actual.x / Actual.y,
+        Error = Observed / Actual,
+        Bias = Bias.x / Bias.y,
+        Predicted = Actual * Bias,
+    )
+ratios.pred <- ratios %>%
+    select(Taxon.x, Taxon.y, Pair, Protocol, Actual, Bias, Predicted) %>%
+    distinct
+```
+```{r, fig.width = 10, fig.height = 7}
+ggplot(ratios, aes(Pair, Error, 
+        label = Individual, color = Protocol)) +
+    geom_point(data = ratios.pred,
+        aes(Pair, Bias), inherit.aes = FALSE,
+        shape = 3, size = 4, color = "black") +
+    geom_text(position = position_jitter(width=0.25, height=0)) +
+    geom_hline(yintercept = 1) +
+    facet_grid(Protocol ~ .) +
+    geom_rangeframe(sides = "l", color= "black") + 
+    scale_color_manual(values = colors.protocol) + 
+    scale_y_log10() +
+    scale_x_discrete(labels = tax_labeller) + 
+    base_theme +
+    tax_theme
+```
+
+Distribution of efficiencies for the three protocols:
+```{r, fig.height = 2, fig.width = 3}
+ggplot(bias, aes(Bias, fill = Protocol)) +
+    geom_dotplot() +
+    scale_x_log10() +
+    facet_grid(Protocol ~ .) +
+    scale_fill_manual(values = colors.protocol) +
+    scale_y_continuous(breaks = NULL) +
+    geom_rangeframe() +
+    base_theme
+```
+
+Make a table for the main text using kable and kableExtra:
+```{r}
+bias_summary <- bias %>%
+    group_by(Protocol) %>%
+    summarize(
+        `Gm. range` = max(Bias) / min(Bias),
+        `Gm. std. dev.` = exp(sd(log(Bias)))
+    ) %>%
+    gather("Statistic", "Value", -Protocol) %>%
+    spread(Protocol, Value)
+bias_summary
+lvls <- c(mock$Taxon, "Gm. range", "Gm. std. dev.")
+bias_tab <- bind_rows(
+    bias %>% spread(Protocol, Bias),
+    bias_summary %>% rename(Taxon = Statistic)
+    ) %>%
+    mutate(Taxon = factor(Taxon, lvls)) %>%
+    arrange(Taxon)
+bias_tab
+```
+
+Table for the main text
+```{r}
+tex <- bias_tab %>%
+    # mutate(Taxon = str_replace(Taxon, "_", " ")) %>%
+    mutate(
+        Taxon = kableExtra::cell_spec(
+            str_replace(Taxon, "_", " "), 
+            "latex", 
+            italic = Taxon %in% mock$Taxon)
+        ) %>%
+    mutate_at(vars(-Taxon), signif, 2) %>%
+    mutate_at(vars(-Taxon), as.character) %>%
+    knitr::kable(format="latex", booktabs = TRUE, linesep = "",
+        escape = FALSE, align = c("l", "r", "r", "r")) %>%
+    # knitr::kable(digits=1, format="latex", booktabs = TRUE, linesep = "",
+    #     escape = FALSE) %>%
+    # kableExtra::kable_styling(latex_options = "striped")
+    kableExtra::row_spec(10, extra_latex_after = "\\midrule")
+tex
+```
+<!--
+TODO: Edit the above to show 2 sig figures instead of 1 decimal place (esp. to
+deal with L plantarum in protocol H).
+TODO: consider adding phylum and/or gram type
+-->
+
+# Calibration
+
+Choose Individuals (specimens) to use for estimating bias.
+```{r}
+set.seed(20190201)
+individuals <- sam$Individual %>% unique
+estimation_set <- base::sample(individuals, 3, replace = FALSE)
+stm0 <- stm %>%
+    mutate(Set = ifelse(Individual %in% estimation_set, "Est", "Eval"))
+sam <- sam %>%
+    mutate(Set = ifelse(Individual %in% estimation_set, "Est", "Eval"))
+```
+Estimate bias from the estimation samples:
+```{r}
+bias_est <- stm0 %>%
+    filter(Set == "Est") %>%
+    group_by(Protocol) %>%
+    nest %>%
+    mutate(Bias = map(data, estimate_bias, method = "center")) %>%
+    unnest(Bias) %>%
+    rename(Bias = Bias_est)
+```
+Compare the bias estimated from the estimation set and that from all specimens:
+```{r}
+bind_rows(list(All = bias, Est = bias_est), .id = "Specimens") %>%
+    ggplot(aes(Taxon, Bias, color = Protocol, shape = Specimens)) + 
+    geom_quasirandom() +
+    scale_y_log10() +
+    scale_shape_manual(breaks = c("All", "Est"), values = c(16, 1)) +
+    scale_color_manual(values = colors.protocol) + 
+    coord_flip()
+```
+
+Bias is consistent with the estimate using all specimens, though this would
+vary for the higher-variance protocols H and Q for some estimation sets.
+
+Also estimate the differential bias to protocol W. First, add a column with the
+"Reference" measurement; then repeat bias estimation with the reference
+measurement instead of the Actual abundance.
+```{r}
+stmW <- stm0 %>%
+    select(Taxon, Protocol, Individual, Set, Observed) %>%
+    spread(Protocol, Observed) %>%
+    mutate(Actual = W) %>%
+    gather("Protocol", "Observed", H, Q, W)
+biasW_est <- stmW %>%
+    filter(Set == "Est") %>%
+    group_by(Protocol) %>%
+    nest %>%
+    mutate(Bias = map(data, estimate_bias, method = "center")) %>%
+    unnest(Bias) %>%
+    rename(BiasW = Bias_est)
+biasW_est %>%
+    spread(Protocol, BiasW)
+```
+
+Calibrate all samples
+```{r}
+stm0 <- stm0 %>%
+    left_join(bias_est, by = c("Protocol", "Taxon")) %>%
+    left_join(biasW_est, by = c("Protocol", "Taxon")) %>%
+    mutate_by(Sample, 
+        Calibrated_to_Actual = close_elts(Observed / Bias),
+        Calibrated_to_W = close_elts(Observed / BiasW)
+    )
+```
+
+## Sample ordination: Compositional PCA
+
+Prep for the PCA: we first need to Clr transform each relative abundance
+vector.
+```{r}
+stm1 <- stm0 %>%
+    gather("Type", "Abundance", 
+        Observed, Actual, Calibrated_to_Actual, Calibrated_to_W) %>%
+    select(Taxon:Individual, Set:Abundance) %>%
+    group_by(Sample, Type) %>%
+    mutate(Clr = clr(Abundance)) %>%
+    ungroup
+```
+Get a matrix with samples as rows to use for the PCA.
+```{r}
+temp <- stm1 %>%
+    unite("Sample_Type", Sample, Type, sep = ":") %>%
+    select(Sample_Type, Taxon, Clr) %>%
+    spread(Taxon, Clr)
+mat <- temp %>%
+    select(-Sample_Type) %>%
+    as("matrix")
+rownames(mat) <- temp$Sample_Type
+corner(mat)
+```
+Note that each sample (protocol + individual) appears four times, as Observed,
+Actual, Calibrated to Actual, and Calibrated to W, and currently I'm just doing
+a simple PCA on all of these, since our goal is mainly to illustrate the effect
+of calibration rather than make quantitative claims about variation. Next we
+run the PCA and make a tibble for plotting,
+```{r}
+pcx <- prcomp(mat)
+tb <- as_tibble(pcx$x[,c(1,2)], rownames='Sample_Type') %>%
+    separate(Sample_Type, c("Sample", "Type"), sep = ":") %>%
+    left_join(sam, by = "Sample")
+tb <- tb %>%
+    mutate(PC1 = -PC1, PC2 = PC2)
+```
+Nearly 90% of the variance is covered by the first two PCs, with about 3.4x as
+much variation on PC1 than PC2:
+```{r}
+fracvar <- pcx$sdev^2/sum(pcx$sdev^2)
+percvar <- round(100 * fracvar, 1)
+strivar <- paste0("PC", seq(fracvar), " [", percvar, "%]")
+strivar
+```
+
+PCA figure that will form the right half of the main text figure:
+```{r}
+facet_labeller <- function (tb) {
+    tb %>% 
+        mutate_all(str_replace_all, "_", " ") %>%
+        mutate_all(str_replace, " ", "\n")
+}
+type.lvls <- c("Observed", "Calibrated_to_Actual", "Calibrated_to_W")
+actual <- tb %>%
+    filter(Type == "Actual", Sample == "H1") %>%
+    select(PC1, PC2) %>%
+    expand(Type = factor(type.lvls, type.lvls), PC1, PC2)
+tb0 <- tb %>%
+    filter(Type != "Actual") %>%
+    mutate(Type = factor(Type, type.lvls))
+tb.breaks <- 
+    tribble(
+        ~PC1, ~PC2,
+        min(tb0$PC1), min(tb0$PC2),
+        actual$PC1[1], actual$PC2[1],
+        max(tb0$PC1), max(tb0$PC2),
+        )
+p.pca <- ggplot(tb0, aes(PC1, PC2, color = Protocol, shape = Set)) +
+    geom_point(data = actual, aes(PC1, PC2),
+        shape = 3, size = 4, color = "black") +
+    geom_point() +
+    facet_grid(Type ~ ., labeller = facet_labeller) +
+    geom_rangeframe(data = tb.breaks, aes(PC1, PC2), 
+        color = "black", inherit.aes = FALSE) + 
+    scale_x_continuous(breaks = tb.breaks$PC1, labels = NULL) +
+    scale_y_continuous(breaks = tb.breaks$PC2, labels = NULL) +
+    scale_shape_manual(breaks = c("Est", "Eval"), values = c(1, 16)) +
+    scale_color_manual(values = colors.protocol) + 
+    base_theme +
+    theme(strip.text.y = element_text(angle=0, size = 9)) +
+    # theme(axis.line = element_line()) +
+    labs(title = "Sample ordination")
+# Label the protocols in the "Observed" plot
+labtb <- tribble(
+    ~x,     ~y,   ~Protocol,
+    -4,    1.5,   "H",
+    0,     2,     "Q",
+    -1.3,  -0.5,  "W",
+    2.3,     0.9,   "Actual"
+    ) %>%
+    mutate(Type = factor("Observed", type.lvls))
+p.pca <- p.pca +
+    geom_text(data = labtb,
+        aes(x, y, label = Protocol, color = Protocol), 
+        size = 3, inherit.aes = FALSE, show_guide = FALSE)
+# p.pca
+```
+
+## Relative abundances before and after calibration
+
+Figure showing the relative abundances, which will form the left half of the
+main text figure:
+```{r}
+stm1 <- stm1 %>% 
+    group_by(Sample, Type) %>%
+    mutate(Abundance = center_elts(Abundance)) %>%
+    ungroup
+tbrf <- tibble(Abundance = range(stm1$Abundance))
+p.step.cal <- stm1 %>% 
+    filter(Type %in% type.lvls) %>%
+    mutate(Taxon = factor(Taxon, mock$Taxon),
+        Type = factor(Type, type.lvls)) %>%
+    ggplot(aes(x = Taxon, y = Abundance, color = Protocol, shape = Set)) + 
+    geom_quasirandom() +
+    geom_rangeframe(data = tbrf, aes(y = Abundance), 
+        color = "black", sides = "l", inherit.aes = FALSE) +
+    scale_color_manual(values = colors.protocol) + 
+    scale_y_log10(labels = log_formatter) +
+    scale_x_discrete(labels = tax_labeller) + 
+    coord_cartesian(clip = "off") +
+    labs(title = "Taxon relative abundances",
+        y = "Abundance relative to geometric mean") + 
+    facet_grid(Type ~ .) +
+    scale_shape_manual(breaks = c("Est", "Eval"), values = c(1, 16)) +
+    scale_color_manual(values = colors.protocol) + 
+    base_theme + 
+    tax_theme +
+    theme(strip.text.y = element_blank())
+# Add the actual abundances (as a stair plot like in Costea2017's Figure 6)
+# underneath the data points
+tb.step.cal <- tb.step %>%
+    expand(Type = factor(type.lvls, type.lvls), nesting(x, Actual))
+p.step.cal$layers <- c(
+    geom_step(data = tb.step.cal, aes(x = x, y = Actual), 
+        size = 0.3, color = "black", inherit.aes = FALSE),
+    p.step.cal$layers)
+# p.step.cal
+```
+
+## Main text figure
+
+```{r, fig.width = 6.5, fig.height = 6.5}
+plot_grid(p.step.cal, 
+    p.pca + 
+        theme(legend.position = "bottom", legend.box = "vertical",
+            legend.margin = margin(),
+            legend.spacing = unit(0, "in"),
+        )
+)
+```
+
+```{r, include = FALSE, eval = SAVE_FIGURES}
+ggsave(file.path(fig_path, "costea2017_calibration.png"),
+    width = 6.5, height = 6.5, units = "in")
+ggsave(file.path(fig_path, "costea2017_calibration.pdf"),
+    width = 6.5, height = 6.5, units = "in")
+```
+
+# Session info
+
+```{r}
+sessionInfo()
+```
