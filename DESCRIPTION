@@ -1,0 +1,27 @@
+Package: BiasAnalysis
+Title: Analysis for McLaren, Willis, and Callahan (2019)
+Version: 0.0.0.9000
+Authors@R: 
+    person(given = "Michael",
+           family = "McLaren",
+           role = c("aut", "cre"),
+           email = "m.mclaren42@gmail.com")
+    person(given = "Amy",
+           family = "Willis",
+           role = c("aut"),
+           email = "")
+    person(given = "Benjamin",
+           family = "Callahan",
+           role = c("aut"),
+           email = "")
+Description: Data and code for the manuscript [biorxiv link]
+License: Insert license here
+Encoding: UTF-8
+LazyData: true
+RoxygenNote: 6.1.1
+Suggests: 
+    knitr,
+    rmarkdown
+VignetteBuilder: knitr
+Imports: 
+    magrittr
