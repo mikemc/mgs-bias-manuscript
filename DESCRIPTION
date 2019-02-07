@@ -19,9 +19,14 @@ License: Insert license here
 Encoding: UTF-8
 LazyData: true
 RoxygenNote: 6.1.1
+Imports:
+    magrittr,
+    tidyverse
 Suggests: 
+    cowplot,
+    ggthemes,
+    ggbeeswarm,
     knitr,
+    kableExtra,
     rmarkdown
 VignetteBuilder: knitr
-Imports: 
-    magrittr

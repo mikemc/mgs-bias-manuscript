@@ -1,0 +1,4 @@
+# A file is needed to be able to add this folder to the git repo. So we add
+# this .gitignore file, and tell git to ignore everything else in this folder
+*
+!.gitignore
