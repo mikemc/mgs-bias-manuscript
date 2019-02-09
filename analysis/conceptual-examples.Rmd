@@ -1,0 +1,243 @@
+---
+title: "Conceptual examples"
+author: Michael McLaren
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    self_contained: true
+    highlight: tango
+---
+
+# R setup 
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(progress=TRUE, verbose=TRUE)
+# Global chunk options
+knitr::opts_chunk$set(cache=TRUE, autodep = TRUE,
+    include=TRUE, echo=TRUE,
+    warning=TRUE, message=FALSE, 
+    fig.width=5, fig.height=4)
+```
+
+```{r load_packages}
+library(tidyverse)
+library(ggthemes)
+# library(cowplot)
+# library(ggbeeswarm)
+# This package
+devtools::load_all(here::here())
+```
+
+```{r set_paths}
+fig_path <- file.path(here::here(), "figures")
+data_path <- file.path(here::here(), "data")
+```
+
+```{r plot_setup}
+base_theme <- theme_tufte() + 
+    theme(
+        text = element_text(size=9, family = ""),
+        legend.position = "none"
+        )
+base_theme0 <- theme_grey() + 
+    theme(
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank()
+        )
+tax_theme <- theme(
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1), 
+        axis.title.x = element_blank())
+
+update_geom_defaults("point", list(size = 1))
+update_geom_defaults("text", list(size = 2.5))
+update_geom_defaults("hline", list(color = "grey"))
+```
+
+# Example: three-species communities
+
+We will consider the three taxa in the main text Figures 1 and 2, with bias
+equal to `(1, 18, 6)`. We consider three samples; samples S1 and S2 in the main
+text, and a third sample S3 that switches the abundance of the second and third
+taxa in sample S3. First we create a data frame with the actual compositions
+and the bias.
+```{r}
+tb <- tibble(
+    Taxon = c("T1", "T2", "T3"), 
+    Bias = c(1, 18, 6),
+    S1 = c(1, 1, 1),
+    S2 = c(1, 1/15, 4/15),
+    S3 = c(1, 4/15, 1/15),
+    ) 
+print(tb)
+```
+Note that we have expressed bias and the relative abundances as relative to
+taxon 1.  Then, we gather these relative abundances into a tidy form, use the
+bias to calculate the observed abundances, and also obtain the proportions from
+the relative abundances.
+```{r}
+tb <- tb %>%
+    gather("Sample", "Actual", S1:S3) %>%
+    mutate(Observed = Actual * Bias) %>%
+    gather("Type", "Abundance", Actual, Observed) %>%
+    mutate_by(c(Sample, Type), Proportion = close_elts(Abundance)) %>%
+    select(Sample, Taxon, Bias, everything())
+tb
+```
+
+## Error in ratios vs. error in proportions
+
+The proportions used to label Figure 2:
+```{r}
+tb0 <- tb %>%
+    select(-Abundance) %>%
+    spread(Type, Proportion) %>%
+    arrange(Sample, Taxon)
+tb0 %>%
+    knitr::kable(digits = 2, format = "pandoc")
+```
+
+We can view the measurement error across the three samples with bar plots, as
+done in main text Figure 2.
+```{r}
+ggplot(tb, aes(x = Type, y = Proportion, fill = Taxon)) +
+    geom_bar(stat = "identity") +
+    facet_wrap(~Sample, scales = "free")
+```
+
+From this figure, we can see that the error in the proportions differs for the
+three samples.
+
+Calculate the compositional error and the fold-error in proportions:
+```{r}
+err <- tb %>%
+    select(-Abundance) %>%
+    spread(Type, Proportion) %>%
+    arrange(Sample, Taxon) %>%
+    mutate(Error = Observed / Actual) %>%
+    mutate_by(Sample, 
+        Error.T1 = Error / Error[1],
+    )
+err %>%
+    knitr::kable(digits = 2, format = "pandoc")
+```
+
+The `Error` column shows the fold error in the Proportions, while the
+`Error.T1` column divides this by the Error of taxon T1 in each sample and
+equals the Bias relative to T1. We can see that the fold-error error in
+proportions of a given taxon varies across samples, but when divided by the
+fold-error in taxon T1, is consistent.
+
+The sample mean efficiencies are
+```{r}
+sme <- err %>%
+    group_by(Sample) %>%
+    summarize(SME = sum(Actual * Bias) / sum(Actual))
+sme
+```
+Check that the observed proportions are given by the equation from the main
+text---
+```{r}
+err0 <- left_join(err, sme, by = "Sample")
+err0 %>%
+    mutate(Observed0 = Actual * Bias / SME) %>%
+    {all.equal(.$Observed, .$Observed0)}
+```
+
+
+## Analysis of compositional differences between samples
+
+We get very different pictures comparing the three samples based on the Actual
+or the Observed proportions.
+```{r}
+ggplot(tb, aes(x = Sample, y = Proportion, fill = Taxon)) +
+    geom_bar(stat = "identity") +
+    facet_wrap(~Type) +
+    scale_y_continuous(breaks = c(0, 0.5, 1), labels = c(0, 0.5, 1)) +
+    base_theme +
+    theme(strip.text = element_text(size = 9))
+```
+
+```{r, include = FALSE, eval = FALSE}
+ggsave(file.path(fig_path, "community_clustering.pdf"),
+    width = 3, height = 2.5, units = "in")
+```
+
+From this figure, it is apparent that Sample S1 is the most even and thus has
+the highest diversity by any metric that values evenness (such as the Shannon
+or Inverse Simpson indices), but but sample S2 is observed to be the most even
+and thus to have the highest diversity.
+
+We can also see that Samples S1 and S2 are more similar compositionally by the
+Bray-Curtis (BC) community similarity, but that samples S1 and S3 appear to be
+the most similar. This is easy to see because BC similarity, when applied to
+proportions, simply sums up the amount of shared proportion of each taxon.
+
+```{r}
+B <- c(1, 18, 6)
+A1 <- c(1, 1, 1)
+A2 <- c(1, 1/15, 4/15)
+A3 <- c(1, 4/15, 1/15)
+O1 <- close_elts(A1 * B)
+O2 <- close_elts(A2 * B)
+O3 <- close_elts(A3 * B)
+```
+The BC index gives a different clustering when applied to the actual and
+observed compositions.
+```{r, collapse = TRUE}
+# Actual
+xydist(A1, A2, method = "bray")
+xydist(A1, A3, method = "bray")
+xydist(A2, A3, method = "bray")
+# Observed
+xydist(O1, O2, method = "bray")
+xydist(O1, O3, method = "bray")
+xydist(O2, O3, method = "bray")
+```
+The Aitchison distances are invariant to bias, although sample 1 is equidistant
+from samples 2 and 3, so clustering isn't possible in this toy example.
+```{r, collapse = TRUE}
+# Actual
+xydist(A1, A2, method = "aitchison")
+xydist(A1, A3, method = "aitchison")
+xydist(A2, A3, method = "aitchison")
+# Observed
+xydist(O1, O2, method = "aitchison")
+xydist(O1, O3, method = "aitchison")
+xydist(O2, O3, method = "aitchison")
+```
+
+## Taxonomic aggregation
+
+The theoretical bias invariance of ratio-based analyses does not hold under the
+common practice of taxonomically agglomerating abundances prior to analysis.
+For example, suppose the red and green taxa are in phylum P1 and the blue taxon
+is in phylum P2.
+```{r}
+tb1 <- tb %>%
+    mutate(Phylum = ifelse(Taxon < "T3", "P1", "P2")) %>%
+    group_by(Sample, Type, Phylum) %>%
+    summarize(Proportion = sum(Proportion)) %>%
+    ungroup
+tb1
+```
+Consider the ratio of phylum 1 to phylum 2,
+```{r}
+tb1 <- tb1 %>%
+    spread(Phylum, Proportion) %>%
+    mutate(Ratio = P1 / P2) %>%
+    select(-P1, -P2) %>%
+    spread(Sample, Ratio)
+tb1
+```
+From Community 1 to Community 2, the ratio of P1 to P2 increases by a factor of
+4/2 = 2x but is observed to decrease by factor of 1.38/3.17 = 0.44x.
+
+
+# Session info
+
+```{r}
+sessionInfo()
+```
