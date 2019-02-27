@@ -9,6 +9,10 @@
 # See https://stackoverflow.com/questions/26781676/align-legend-text-in-ggplot
 # for background on fix to legend alignment issue; use bquote without making an
 # expression.
+
+#' Formatter for taxon names in the initial form of "Genus_species"
+#'
+#' @export
 tax_labeller <- function (name) {
     name %>%
         str_replace_all("[a-z]+_", "\\. ") %>%
@@ -18,6 +22,10 @@ tax_labeller <- function (name) {
 
 # To get a prettier formatting of log-scale axes, use the following labeller
 # function:
+
+#' Formatter for log axes
+#'
+#' @export
 log_formatter <- function (x) {
     format(x, scientific = 1,
         trim = TRUE, justify  = "none", 
@@ -26,6 +34,8 @@ log_formatter <- function (x) {
 
 
 #' Extract the x and y values from a ggplot object
+#'
+#' @export
 xy_values <- function(ggplot) {
     tibble(
         x = rlang::eval_tidy(ggplot$mapping$x, data = ggplot$data),

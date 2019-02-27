@@ -5,11 +5,15 @@
 # Element-wise functions ------------------------------------------------------
 
 #' Convert proportions
+#'
+#' @export
 odds <- function (x) {
     x / (1-x)
 }
 
 #' Logit (log-odds) of t
+#'
+#' @export
 logit <- function (x) {
     log(x) - log(1-x)
 }
@@ -17,6 +21,8 @@ logit <- function (x) {
 # Summaries of relative abundance vectors--------------------------------------
 
 #' Geometric mean of x.
+#'
+#' @export
 g_mean <- function(x, na_rm = FALSE) {
     exp(mean(log(x), na.rm = na_rm))
 }
@@ -24,16 +30,22 @@ g_mean <- function(x, na_rm = FALSE) {
 #' Geometric standard deviation of x.
 #'
 #' Note, uses denominator n-1
+#'
+#' @export
 g_sd <- function(x, na_rm = FALSE) {
     exp(sd(log(x), na.rm = na_rm))
 }
 
 #' Geometric range of x.
+#'
+#' @export
 g_range <- function(x) {
     max(x) / min(x)
 }
 
 #' Shannon entropy of x.
+#'
+#' @export
 entropy <- function (x) {
     x <- x[x>0]
     x <- x / sum(x)
@@ -43,11 +55,15 @@ entropy <- function (x) {
 # Transformations for relative abundance vectors ------------------------------
 
 #' "Close" the elements of x to proportions
+#'
+#' @export
 close_elts <- function (x, na_rm = FALSE) {
     x / sum(x, na.rm = na_rm)
 }
 
 #' Geometrically center the elements of x
+#'
+#' @export
 center_elts <- function (x, na_rm = FALSE) {
     exp(log(x) - mean(log(x), na.rm = na_rm))
 }
@@ -56,6 +72,8 @@ center_elts <- function (x, na_rm = FALSE) {
 #' 
 #' @param x Vector of abundances.
 #' @param base Base for logarithm
+#'
+#' @export
 clr <- function(x, base = exp(1), na_rm = FALSE) {
     log(x, base = base) - mean(log(x, base = base), na.rm = na_rm)
 }
@@ -74,6 +92,8 @@ clr <- function(x, base = exp(1), na_rm = FALSE) {
 #' converts x and y to proportions before computing.
 #'
 # Bray method is equal to `vegan::vegdist(rbind(close_elts(x), close_elts(y)))[1]`
+#'
+#' @export
 xydist <- function(x, y, method = "aitchison", trim = FALSE) {
     if (length(x) != length(y)) {
         stop("x and y have different lengths")
@@ -96,6 +116,8 @@ xydist <- function(x, y, method = "aitchison", trim = FALSE) {
 #' Aitchison norm of x
 #'
 #' @param na_rm; remove NAs and NaNs before calculating
+#'
+#' @export
 anorm <- function (x, na_rm = FALSE) {
     x %>%
         clr(., na_rm = na_rm) %>%
@@ -107,6 +129,8 @@ anorm <- function (x, na_rm = FALSE) {
 # Ratios ----------------------------------------------------------------------
 
 #' Pairwise ratios of the elements of x
+#'
+#' @export
 pw_ratios <- function (x) {
     tidyr::crossing(i = seq(x), j = seq(x)) %>%
         {purrr::map2_dbl(.$i, .$j, ~ x[.x] / x[.y])}

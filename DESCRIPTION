@@ -16,12 +16,12 @@ LazyData: true
 RoxygenNote: 6.1.1
 Imports:
     magrittr,
-    here,
     tidyverse
 Suggests: 
     cowplot,
     devtools,
     dotenv,
+    here,
     ggthemes,
     ggbeeswarm,
     knitr,

@@ -7,6 +7,8 @@
 #' @param method - "rss" (default) or "center"
 #' @param bound - lower and upper bound on the log efficiencies for the "rss"
 #' method
+#'
+#' @export
 estimate_bias <- function(tb, method = "rss", bound = 10) {
     if (method == "rss") {
         # `rss` computes the residual sum of squares of the
