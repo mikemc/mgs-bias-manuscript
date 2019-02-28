@@ -1,0 +1,2 @@
+# Ignore HTML files in Github statistics
+*.html linguist-vendored
