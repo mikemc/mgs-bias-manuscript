@@ -25,7 +25,7 @@ knitr::opts_chunk$set(
 
 Run with `SAVE_FIGURES = TRUE` to save figures in `figures/`. 
 ```{r}
-SAVE_FIGURES = FALSE
+SAVE_FIGURES = TRUE
 fig_path <- file.path(here::here(), "figures")
 ```
 
@@ -590,11 +590,9 @@ plot_grid(row1, row2, ncol=1, rel_heights = c(1, 1.1))
 ```
 
 ```{r, include = FALSE, eval = SAVE_FIGURES}
-ggsave(file.path(git_path, "paper1/figures", 
-        "brooks2015_4panel.pdf"),
+ggsave(file.path(fig_path, "brooks2015_4panel.pdf"),
     width = 6.5, height = 5.5, units = "in", scale = 4/3)
-ggsave(file.path(git_path, "paper1/figures", 
-        "brooks2015_4panel.png"),
+ggsave(file.path(fig_path, "brooks2015_4panel.png"),
     width = 6.5, height = 5.5, units = "in", scale = 4/3)
 ```
 
@@ -810,6 +808,150 @@ cal %>%
         Dist.Ai = xydist(Estimate, Actual, method = "aitchison", trim = TRUE)
     ) %>%
     summarize_at(vars(Dist.BC, Dist.Ai), mean)
+```
+
+
+# Model comparisons
+
+Starting point for fitting the linear models. For fitting the linear models on
+the proportions, keep single-species samples and rows where `Actual == 0`. Will
+still set `Observed == 0` for taxa not supposed to be in the samples (i.e.,
+remove cross-sample contamination).
+```{r}
+main1 <- main %>%
+    mutate_by(Sample, 
+        Observed = close_elts(Count * Expected),
+        Actual = close_elts(Expected)) %>%
+    select(-Count, -Expected) %>%
+    select(Sample, Taxon, Observed, Actual, everything())
+```
+
+## Simple linear regression on the proportions
+
+Simple linear model of Actual ~ Observed, without and with intercept term. Each
+taxon is fit independently.
+```{r}
+fits.slm <- main1 %>%
+    group_by(Mixture_type, Taxon) %>%
+    nest %>%
+    mutate(
+        fit0 = map(data, ~lm(Observed ~ 0 + Actual, data = .)),
+        fit1 = map(data, ~lm(Observed ~ 1 + Actual, data = .)),
+        )
+```
+The fits in `fit0` and `fit1` are without and with an intercept term.
+```{r, fig.height = 6.5, fig.width = 7.5}
+preds.slm <- fits.slm %>%
+    gather("Model", "Fit", fit0, fit1) %>%
+    unnest(data, map(Fit, broom::augment))
+ggplot(preds.slm, aes(.fitted, Observed, color = Taxon)) +
+    geom_quasirandom() +
+    facet_grid(Mixture_type ~ Model) +
+    labs(c = "Model prediction")
+```
+
+The models are very similar, so we'll use the simpler model (with no intercept
+term) from here on.
+```{r, fig.height = 6.5, fig.width = 7.5}
+preds.slm <- preds.slm %>%
+    filter(Model == "fit0")
+```
+
+## Brooks2015 model
+
+The model is decribed in the Methods section "Experimental design
+andmixture effect models" of [Brooks et al
+2015](http://www.biomedcentral.com/1471-2180/15/66). For a given taxon in a
+given mixture experiment, the model is specified by the formula
+```{r}
+fmla <- as.formula(paste(
+        "Observed ~ 0 + (", 
+        paste(taxa, collapse = "+"),
+        ")^3"))
+fmla
+```
+where Observed is the observed proportion of the given taxon and the taxon
+names on the right-hand side (the predictors) are the actual proportions of the
+taxa.
+To fit this model, we need a data frame with each row corresponding to a given
+taxon's observed abundance in a sample, and the actual abundances of all 7
+taxa.
+```{r}
+actual <- main1 %>%
+    select(Sample, Taxon, Actual) %>%
+    spread(Taxon, Actual)
+tb <- main1 %>%
+    left_join(actual, by = "Sample")
+tb %>% glimpse
+```
+We again fit this model with `lm` for each experiment and taxon,
+and extract the predictions for plotting.
+```{r}
+fits.brooks <- tb %>%
+    group_by(Mixture_type, Taxon) %>%
+    nest %>%
+    mutate( fit = map(data, ~lm(fmla, data = .)) )
+preds.brooks <- fits.brooks %>%
+    unnest(data, map(fit, broom::augment))
+```
+
+## Plot with all three models
+
+Finally, we'll plot the fits from the simple linear model (no intercept), the
+Brooks model, and our model. We will restrict to just the samples with at least
+two species and where the Actual proportion is > 0 in order to filter most of
+the cases where the linear models prediction proportions that are outside of
+the [0, 1] interval.
+```{r, fig.height = 6.5, fig.width = 6.5}
+preds <- left_join(
+    preds.slm %>% select(Mixture_type, Taxon, Sample, Observed, Actual,
+        Num_species, Species_list, SLM = .fitted),
+    preds.brooks %>% select(Taxon, Sample, Brooks = .fitted),
+    by = c("Sample", "Taxon")
+    ) %>%
+    left_join(
+        main0 %>% select(Taxon, Sample, Ours = Predicted),
+        by = c("Sample", "Taxon")
+    ) %>%
+    gather("Model", "Predicted", SLM, Brooks, Ours) %>%
+    filter(Actual > 0, Num_species > 1) %>%
+    mutate(
+        Model = factor(Model, c("SLM", "Brooks", "Ours")),
+        Model = fct_recode(Model, 
+            `Simple linear model` = "SLM",
+            `Brooks et al model` = "Brooks",
+            `Our model` = "Ours",
+        )
+    )
+ggplot(preds, aes(logit(Predicted), logit(Observed), color = Taxon)) +
+    geom_abline(intercept = 0, slope = 1, color = "grey") +
+    geom_jitter(width = 0.1, height = 0) +
+    geom_rangeframe(color = "black") + 
+    facet_grid(Mixture_type ~ Model) +
+    base_theme +
+    labs(x = "log-odds(Predicted proportion)", 
+        y = "log-odds(Observed proportion)") +
+    coord_fixed() +
+    scale_color_discrete(labels = tax_labeller) + 
+    theme(
+        panel.spacing.x = unit(1, "lines"),
+        legend.position = "bottom",
+    )
+```
+
+The few remaining NaNs arise during the logit transform of the few remaining
+cases where the Brooks model predicts a proportion less than zero.
+```{r}
+preds %>%
+    filter(Predicted < 0) %>%
+    select(-Species_list)
+```
+
+```{r, include = FALSE, eval = SAVE_FIGURES}
+ggsave(file.path(fig_path, "model_comparison.png"),
+    width = 6.5, height = 6.5, units = "in")
+ggsave(file.path(fig_path, "model_comparison.pdf"),
+    width = 6.5, height = 6.5, units = "in")
 ```
 
 # Session info
