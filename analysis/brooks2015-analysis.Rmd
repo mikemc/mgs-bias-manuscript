@@ -355,11 +355,11 @@ bias <- main0 %>%
     unnest(Fit)
 bias %>% spread(Mixture_type, Bias_est)
 ```
-Add the fitted compositions by `Predicted = Observed / Bias_est`
+Compute the predicted proportions
 ```{r}
 main0 <- main0 %>%
     left_join(bias, by = c("Mixture_type", "Taxon")) %>%
-    mutate_by(Sample, Predicted = close_elts(Observed / Bias_est))
+    mutate_by(Sample, Predicted = close_elts(Actual * Bias_est))
 ```
 And also get the predicted ratios,
 ```{r}
@@ -410,13 +410,19 @@ measures.
 error <- pred %>%
     group_by(Mixture_type, Bias_type) %>%
     summarize(
-        RAdist = sqrt(mean(adist(Observed, Predicted))),
-        Adist2 = mean(adist(Observed, Predicted)^2),
         MSE.prop = mean((Observed - Predicted)^2),
         MSE.logit = mean((logit(Observed) - logit(Predicted))^2),
         RMSE.logit = sqrt(mean( (logit(Observed) - logit(Predicted))^2 )),
         )
 error
+```
+Also check the reduction in error in the compositional geometry using the
+Aitchison distance,
+```{r}
+pred %>%
+    group_by(Mixture_type, Bias_type, Sample) %>%
+    summarize(Adist = anorm(Observed / Predicted)) %>%
+    summarize(Adist = mean(Adist))
 ```
 Plot the log-odds with mean-squared errors,
 ```{r, fig.width = 6.5, fig.height = 6.5}
@@ -783,21 +789,18 @@ Gv and Av in the 7sp mixtures, e.g. due to sample construction error.
 
 Error stats on samples not used to measure bias:
 ```{r}
-cal_error <- cal %>%
+cal %>%
     filter(Num_species < 7) %>%
     group_by(Mixture_type, Estimate_type) %>%
     summarize(
-        RAdist = sqrt(mean(adist(Estimate, Actual))),
-        Adist2 = mean(adist(Estimate, Actual)^2),
         MSE.prop = mean((Estimate - Actual)^2),
         MSE.logit = mean((logit(Estimate) - logit(Actual))^2),
         RMSE.logit = sqrt(mean( (logit(Estimate) - logit(Actual))^2 )),
         )
-cal_error
 ```
 
-Average sample dissimilarities (Bray-Curtis and Aitchison distance) before and
-after.
+Average Bray-Curtis dissimilarity and Aitchison distance to the actual
+compositions before and after calibration:
 ```{r}
 cal %>%
     filter(Num_species < 7) %>%
