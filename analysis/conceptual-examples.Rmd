@@ -54,6 +54,12 @@ tax_theme <- theme(
 update_geom_defaults("point", list(size = 1))
 update_geom_defaults("text", list(size = 2.5))
 update_geom_defaults("hline", list(color = "grey"))
+
+colors.taxa <- c(
+    T1 = "#66c2a5", 
+    T2 = "#fc8d62", 
+    T3 = "#8da0cb"
+    )
 ```
 
 # Example: three-species communities
@@ -104,6 +110,7 @@ done in main text Figure 2.
 ```{r}
 ggplot(tb, aes(x = Type, y = Proportion, fill = Taxon)) +
     geom_bar(stat = "identity") +
+    scale_fill_manual(values = colors.taxa) +
     facet_wrap(~Sample, scales = "free")
 ```
 
@@ -156,6 +163,7 @@ ggplot(tb, aes(x = Sample, y = Proportion, fill = Taxon)) +
     geom_bar(stat = "identity") +
     facet_wrap(~Type) +
     scale_y_continuous(breaks = c(0, 0.5, 1), labels = c(0, 0.5, 1)) +
+    scale_fill_manual(values = colors.taxa) +
     base_theme +
     theme(strip.text = element_text(size = 9))
 ```
@@ -213,7 +221,7 @@ xydist(O2, O3, method = "aitchison")
 
 The theoretical bias invariance of ratio-based analyses does not hold under the
 common practice of taxonomically agglomerating abundances prior to analysis.
-For example, suppose the red and green taxa are in phylum P1 and the blue taxon
+For example, suppose the first two taxa are in phylum P1 and the third taxon
 is in phylum P2.
 ```{r}
 tb1 <- tb %>%

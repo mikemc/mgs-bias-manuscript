@@ -25,7 +25,7 @@ knitr::opts_chunk$set(
 
 Run with `SAVE_FIGURES = TRUE` to save figures in `figures/`. 
 ```{r}
-SAVE_FIGURES = FALSE
+SAVE_FIGURES = TRUE
 fig_path <- file.path(here::here(), "figures")
 ```
 
@@ -70,12 +70,19 @@ costea.shape_scale <- scale_shape_manual(
     values = c(16, 1),
     labels = c("Fecal", "Mock only"))
 
-colors.protocol <- scales::hue_pal()(3)
-# costea.protocol <- c("H" = "#F8766D", "Q" = "#00BA38", "W" = "#619CFF")
+# colors.protocol <- scales::hue_pal()(3)
+# colors.protocol <- c("H" = "#F8766D", "Q" = "#00BA38", "W" = "#619CFF")
 # names(colors.protocol) <- c("H", "Q", "W")
 # Or, to match the Costea paper:
-names(colors.protocol) <- c("W", "H", "Q")
-colors.protocol <- c(colors.protocol, Actual = "black")
+# names(colors.protocol) <- c("W", "H", "Q")
+# colors.protocol <- c(colors.protocol, Actual = "black")
+
+# Color-blind friendly colors from ColorBrewer2
+colors.protocol <- c(
+    H = "#1b9e77", 
+    W = "#d95f02", 
+    Q = "#7570b3", 
+    Actual = "black")
 ```
 
 # Data setup
