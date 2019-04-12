@@ -60,6 +60,36 @@ tax_theme <- theme(
 update_geom_defaults("point", list(size = 1))
 update_geom_defaults("text", list(size = 2.5))
 update_geom_defaults("hline", list(color = "grey"))
+update_geom_defaults("hline", list(color = "grey"))
+
+colors.OkabeIto <-  tribble(
+    ~Name, ~Hex,
+    "orange", "#E69F00",
+    "sky blue", "#56B4E9",
+    "bluish green", "#009E73",
+    # "yellow", "#F0E442",
+    "blue", "#0072B2",
+    "vermilion", "#D55E00",
+    "reddish purple", "#CC79A7",
+    "black", "#000000",
+    # "grey", "#999999",
+    "yellow", "#F0E442",
+    )
+# http://dr-k-lo.blogspot.com/2013/07/a-color-blind-friendly-palette-for-r.html
+# cbbPalette <- c("#000000", "#009E73", "#e79f00", "#9ad0f3", "#0072B2", "#D55E00", 
+#     "#CC79A7", "#F0E442")
+
+ggplot_cb <- function(...) {
+    ggplot2::ggplot(...) + scale_color_manual(values = colors.OkabeIto$Hex) + 
+        scale_fill_manual(values = colors.OkabeIto$Hex)
+    # ggplot2::ggplot(...) + 
+    #     scale_color_colorblind() +
+    #     scale_fill_colorblind()
+}
+
+# or try
+# scale_colour_discrete <- function(...) scale_color_manual(..., values)
+
 ```
 
 
@@ -147,6 +177,18 @@ main <- main %>%
     mutate(Expected = str_detect(Species_list, Taxon))
 ```
 
+```{r}
+main %>%
+    select(Sample, Mixture_type, Num_species, Taxon, Expected) %>%
+    spread(Taxon, Expected) %>%
+    filter(Num_species > 1) %>%
+    select(-Sample) %>%
+    distinct() %>%
+    group_by(Mixture_type) %>%
+    summarize(n())
+```
+
+
 ## Species info
 
 Estimated genome size and 16S copy number.
@@ -198,7 +240,7 @@ main %>%
     summarize(Sum = sum(Count)) %>%
     mutate_by(Sample, Prop = Sum / sum(Sum)) %>%
     filter(!Expected) %>%
-    ggplot(aes(Prop, fill = as.factor(Num_species))) +
+    ggplot_cb(aes(Prop, fill = as.factor(Num_species))) +
     geom_dotplot() +
     scale_x_log10() +
     facet_grid(Mixture_type~.) +
@@ -248,11 +290,14 @@ transform to avoid compressing the variation near `p=0` and `p=1`.
 ```{r}
 main0 %>%
     mutate_at(vars(Actual, Observed), logit) %>%
-    ggplot(aes(Actual, Observed, color = Taxon)) + 
+    ggplot_cb(aes(Actual, Observed, color = Taxon)) + 
+    geom_abline(intercept = 0, slope = 1, color = "grey") +
     geom_quasirandom() +
     facet_grid(Mixture_type ~ .) +
     geom_rangeframe(sides = "bl", color= "black") +
-    labs(title = "Observed vs. Actual (log-odds)")
+    labs(title = "Observed vs. Actual (log-odds)") +
+    base_theme +
+    theme(legend.position = "right")
 ```
 
 There is significant error. Moreover, it is not consistent even for a
@@ -261,12 +306,13 @@ our model predicts:
 ```{r, fig.width = 10, fig.height = 6.5}
 main0 %>%
     mutate_at(vars(Actual, Observed), logit) %>%
-    ggplot(aes(Actual, Observed, color = Taxon)) + 
+    ggplot_cb(aes(Actual, Observed, color = Taxon)) + 
+    geom_abline(intercept = 0, slope = 1, color = "grey") +
     geom_quasirandom() +
     facet_grid(Mixture_type ~ Taxon) +
     geom_rangeframe(sides = "bl", color= "black") +
     labs(title = "Observed vs. Actual (log-odds)") +
-    theme(legend.position = "none")
+    base_theme
 ```
 
 The situation doesn't change noticeably with copy-number correction,
@@ -277,7 +323,7 @@ main0 <- main0 %>%
 ```{r}
 main0 %>%
     mutate_at(vars(Actual, CN_corrected), logit) %>%
-    ggplot(aes(Actual, CN_corrected, color = Taxon)) + 
+    ggplot_cb(aes(Actual, CN_corrected, color = Taxon)) + 
     geom_quasirandom() +
     facet_grid(Mixture_type ~ .) +
     geom_rangeframe(sides = "bl", color= "black") +
@@ -323,7 +369,7 @@ cross),
 ```{r, fig.width = 10, fig.height = 6}
 p.pw <- ratios %>% 
     filter(Pair %in% cmb) %>%
-    ggplot(aes(Pair, Error, color = as.factor(Num_species))) +
+    ggplot_cb(aes(Pair, Error, color = as.factor(Num_species))) +
     geom_hline(yintercept = 1) +
     geom_quasirandom() +
     facet_grid(Mixture_type ~ .) +
@@ -426,7 +472,7 @@ pred %>%
 ```
 Plot the log-odds with mean-squared errors,
 ```{r, fig.width = 6.5, fig.height = 6.5}
-p <- ggplot(pred, aes(logit(Predicted), logit(Observed), color = Taxon)) +
+p <- ggplot_cb(pred, aes(logit(Predicted), logit(Observed), color = Taxon)) +
     geom_abline(intercept = 0, slope = 1, color = "grey") +
     geom_jitter(width = 0.1, height = 0) +
     geom_rangeframe(color = "black") + 
@@ -435,7 +481,7 @@ p <- ggplot(pred, aes(logit(Predicted), logit(Observed), color = Taxon)) +
     labs(x = "log-odds(Predicted proportion)", 
         y = "log-odds(Observed proportion)") +
     coord_fixed() +
-    scale_color_discrete(labels = tax_labeller) + 
+    scale_color_manual(values = colors.OkabeIto$Hex, labels = tax_labeller) + 
     theme(
         panel.spacing.x = unit(1, "lines"),
         legend.position = "bottom",
@@ -483,14 +529,14 @@ xtb <- tibble(labels = c("0", "1/7", "1/4", "1/3", "1/2", "1")) %>%
     rowwise() %>%
     mutate(breaks = eval(parse(text = labels)))
 # Panel A
-p.A <- ggplot(pred0, aes(Actual, Observed, color = Taxon)) +
+p.A <- ggplot_cb(pred0, aes(Actual, Observed, color = Taxon)) +
     geom_segment(data=ref_line, aes(x=x, xend=xend, y=y, yend=yend), 
         colour="grey") +
     # geom_abline(slope = 1, intercept = 0, color = "grey") + 
     geom_quasirandom() +
     # geom_jitter(width=0.02, height=0) +
     geom_rangeframe(color = "black", sides = "bl") +
-    scale_color_discrete(labels = tax_labeller) + 
+    scale_color_manual(values = colors.OkabeIto$Hex, labels = tax_labeller) + 
     scale_x_continuous(limits = range.top,
         breaks = xtb$breaks, labels = xtb$labels) +
     scale_y_continuous(limits = range.top, 
@@ -499,12 +545,12 @@ p.A <- ggplot(pred0, aes(Actual, Observed, color = Taxon)) +
         title = "Observed proportion vs. actual") +
     base_theme
 # Panel B
-p.B <- ggplot(pred0, aes(Predicted, Observed, color = Taxon)) +
+p.B <- ggplot_cb(pred0, aes(Predicted, Observed, color = Taxon)) +
     geom_segment(data=ref_line, aes(x=x, xend=xend, y=y, yend=yend), 
         colour="grey") +
     geom_point() +
     geom_rangeframe(color = "black") +
-    scale_color_discrete(labels = tax_labeller) + 
+    scale_color_manual(values = colors.OkabeIto$Hex, labels = tax_labeller) + 
     scale_x_continuous(limits = range.top, 
         breaks = c(0, 0.5, 1), labels = c("0", "0.5", "1")) +
     scale_y_continuous(limits = range.top, 
@@ -538,7 +584,7 @@ pred0.odds %>%
 range.bot <- c(0.02,33)
 # Panel C: Error in proportions (odds transformed)
 p.C <- 
-    ggplot(pred0.odds, aes(x = Taxon, y = Observed / Actual,
+    ggplot_cb(pred0.odds, aes(x = Taxon, y = Observed / Actual,
             color = as.factor(Num_species))) +
     geom_hline(yintercept = 1) +
     geom_quasirandom() +
@@ -551,7 +597,7 @@ p.C <-
     scale_x_discrete(labels = tax_labeller) + 
     base_theme +
     tax_theme
-p.D <- ggplot(ratios0, aes(Pair, Error, color = as.factor(Num_species), 
+p.D <- ggplot_cb(ratios0, aes(Pair, Error, color = as.factor(Num_species), 
         shape = Shape)) +
     # Reference line
     geom_hline(yintercept = 1) +
@@ -608,9 +654,18 @@ bias_steps <- bias %>%
         PCR = DNA / PCR_product,
         Sequencing = PCR_product
     ) %>%
-    arrange(Total)
+    arrange(Total) %>%
+    left_join(sinfo, by = "Taxon") %>%
+    mutate_at(vars(Genome_size, Copy_number), center_elts)
 bias_steps
 ```
+
+The estimated bias of the step is ....
+- Extraction bias = Difference from Cells to DNA;
+- PCR bias = Difference from DNA to PCR product
+- Seq + bioinf bias = Difference from PCR product to unbiased
+
+todo - consider adding Reads = 1 here.
 
 ## Table
 
@@ -659,6 +714,255 @@ tex <- bias_steps0 %>%
 tex
 ```
 
+## Main figure
+
+Left panel: Estimated bias for each mixture experiment, plus an imagined
+"Reads" mixture experiment that by definition has no bias.
+```{r}
+# Setup tibble for plotting
+bias_steps.plot <- bias_steps %>%
+    select(Taxon, Cells, DNA, PCR_product) %>%
+    add_column(`Reads*` = 1) %>%
+    gather("Mixture_type", "Bias", -Taxon) %>%
+    mutate_at(vars(Mixture_type), str_replace, "_", " ") %>%
+    mutate(Taxon = factor(Taxon, bias_steps$Taxon))
+# Tibble for plotting a reference line corresponding to no bias
+ref.left <- tibble(Mixture_type = factor(c("Cells", "Reads*"), 
+        c("Cells", "DNA", "PCR product", "Reads*")),
+    Bias = 1)
+p.left <- ggplot(bias_steps.plot, aes(Mixture_type, Bias, color = Taxon)) +
+    geom_path(data = ref.left, aes(group = Bias), color = "grey") +
+    geom_path(aes(group = Taxon)) +
+    geom_point() +
+    scale_y_log10(limits = c(0.1, 5), labels = log_formatter) +
+    scale_x_discrete(expand = c(0.07, 0.06)) +
+    geom_rangeframe(color = "black") +
+    scale_color_manual(values = colors.OkabeIto$Hex, labels = tax_labeller) + 
+    labs(x = "Mixture type", y = "Efficiency / Gm. mean", 
+        title = "Bias in each mixture type") +
+    guides(color = guide_legend(reverse = TRUE)) +
+    base_theme
+p.left + 
+    theme(legend.position = "right")
+```
+
+Right panel: Predicted relative abundances through the workflow starting from
+an even mixture of cells.
+
+```{r}
+# Tibble of the relative abundances through the workflow
+ra_steps <- bias_steps %>%
+    add_column(T0 = 1) %>%
+    mutate(T1 = T0 * Extraction, T2 = T1 * PCR, T3 = T2 * Sequencing) %>%
+    transmute(Taxon, Actual = T0, After_extraction = T1, After_PCR = T2,
+        Observed = T3) %>%
+    gather("Step", "Abundance", -Taxon) %>%
+    mutate_at(vars(Step), str_replace, "_", " ") %>%
+    mutate(Taxon = factor(Taxon, bias_steps$Taxon))
+# Tibble for reference line
+ref.right <- tibble(Step = factor(c("Actual", "Observed"), 
+        c("Actual", "After extraction", "After PCR", "Observed")),
+    Abundance = 1)
+p.right <- ra_steps %>%
+    ggplot(aes(Step, Abundance, color = Taxon)) +
+    geom_path(data = ref.right, aes(group = Abundance), color = "grey") +
+    geom_path(aes(group = Taxon)) +
+    geom_point() +
+    scale_y_log10(limits = c(0.1, 5), labels = log_formatter) +
+    scale_x_discrete(expand = c(0.07, 0.06)) +
+    geom_rangeframe(color = "black") +
+    scale_color_manual(values = colors.OkabeIto$Hex, labels = tax_labeller) + 
+    labs(x = "Step in workflow", y = "Abundance / Gm. mean", 
+        title = "Composition through the workflow") +
+    guides(color = guide_legend(reverse = TRUE)) +
+    base_theme
+p.right + 
+    theme(legend.position = "right")
+```
+
+
+```{r}
+l <- get_legend(p.left + theme(legend.position = c(0.45, 0.55), 
+        plot.margin = margin(t=5, b=5)))
+plot_grid(
+    # p.left + theme(plot.margin = margin(l=5, t=5, b=5)),
+    # p.right + theme(plot.margin = margin(t=5, b=5)),
+    p.left,
+    p.right,
+    l,
+    labels = c("A", "B", NULL),
+    nrow = 1, rel_widths = c(1, 1, 0.3))
+```
+
+```{r, include = FALSE, eval = SAVE_FIGURES}
+ggsave(file.path(fig_path, "brooks2015_bias_workflow.png"),
+    width = 7, height = 3, units = "in")
+ggsave(file.path(fig_path, "brooks2015_bias_workflow.pdf"),
+    width = 7, height = 3, units = "in")
+ggsave(file.path(fig_path, "brooks2015_bias_workflow.svg"),
+    width = 7, height = 3, units = "in", scale = 4/3)
+```
+
+Bias of individual steps appears as the multiplicative changes from one point
+to the next (right panel); and the multiplicative differences between
+experiments (left panel)
+
+The (compositional) difference between the bias observed in different mixture
+types provides an estimate of the bias of individual workflow steps. 
+
+( and to
+predict how the composition of a sample changes throughout the workflow.
+)
+
+### Alt. - just p.right, with copy number correction
+
+```{r}
+lvls.position <- c("Actual", "After extraction", "After PCR", "Read counts", 
+            "CN corrected")
+# Tibble of the relative abundances through the workflow
+ra_steps <- bias_steps %>%
+    add_column(T0 = 1) %>%
+    mutate(
+        T1 = T0 * Extraction, 
+        T2 = T1 * PCR, 
+        T3 = T2 * Sequencing,
+        T4 = T3 / Copy_number,
+        ) %>%
+    transmute(Taxon, Actual = T0, After_extraction = T1, After_PCR = T2,
+        Read_counts = T3, CN_corrected = T4) %>%
+    mutate(Taxon = fct_reorder(Taxon, CN_corrected)) %>%
+    gather("Position", "Abundance", -Taxon) %>%
+    mutate_at(vars(Position), str_replace, "_", " ")
+# Tibble for reference line
+ref.right <- tibble(Position = factor(lvls.position, lvls.position), Abundance = 1)
+p.right <- ra_steps %>%
+    ggplot(aes(Position, Abundance, color = Taxon)) +
+    geom_path(data = ref.right, aes(group = Abundance), color = "grey") +
+    geom_path(aes(group = Taxon)) +
+    geom_point() +
+    scale_y_log10(breaks = c(0.1, 0.3, 1, 3, 10), labels = log_formatter) +
+    # scale_y_log10(limits = c(0.1, 5), labels = log_formatter) +
+    scale_x_discrete(expand = c(0.07, 0.06)) +
+    geom_rangeframe(color = "black") +
+    scale_color_manual(values = colors.OkabeIto$Hex, labels = tax_labeller) + 
+    labs(x = "Position in the workflow", y = "Abundance / Gm. mean", 
+        title = "Composition throughout the workflow") +
+    guides(color = guide_legend(reverse = TRUE)) +
+    base_theme
+p.right + 
+    theme(legend.position = "right")
+```
+
+Q: Would it be better to label the steps (the points in between the positions /
+time points, as Extraction, PCR, Sequencing, CN correction), rather than the
+workflow positions?
+
+Also, should we change Observed to "After informatics" or "Assigned reads"
+similar, since the cn-corrected abundances "Observed" could also be the 
+
+```{r, include = FALSE, eval = SAVE_FIGURES}
+ggsave(file.path(fig_path, "brooks2015_bias_workflow_1p.png"),
+    width = 4.5, height = 3, units = "in")
+ggsave(file.path(fig_path, "brooks2015_bias_workflow_1p.pdf"),
+    width = 4.5, height = 3, units = "in")
+```
+
+### Alt 2 panel
+
+setup
+```{r}
+lvls.steps <- c("Extraction", "PCR", "Sequencing", "CN correction")
+bias_steps.plot <- bias_steps %>%
+    transmute(Taxon, Extraction, PCR, Sequencing, 
+        CN_correction = 1 / Copy_number) %>%
+    mutate(Taxon = fct_reorder(Taxon, 
+            Extraction * PCR * Sequencing * CN_correction)) %>%
+    gather("Step", "Bias", -Taxon) %>%
+    mutate_at(vars(Step), str_replace, "_", " ")
+lvls.position <- c("Actual", "After extraction", "After PCR", "Read counts", 
+            "CN corrected")
+# Tibble of the relative abundances through the workflow
+ra_steps <- bias_steps %>%
+    add_column(T0 = 1) %>%
+    mutate(
+        T1 = T0 * Extraction, 
+        T2 = T1 * PCR, 
+        T3 = T2 * Sequencing,
+        T4 = T3 / Copy_number,
+        ) %>%
+    transmute(Taxon, Actual = T0, After_extraction = T1, After_PCR = T2,
+        Read_counts = T3, CN_corrected = T4) %>%
+    mutate(Taxon = fct_reorder(Taxon, CN_corrected)) %>%
+    gather("Position", "Abundance", -Taxon) %>%
+    mutate_at(vars(Position), str_replace, "_", " ")
+```
+
+Alt left panel - show the estimated bias of each step
+```{r}
+# shared params
+ylimits <- ra_steps$Abundance %>% range
+xexpand <- c(0.1, 0.1)
+## Left panel
+# Tibble for reference line
+ref.left <- tibble(Step = factor(lvls.steps, lvls.steps), Bias = 1)
+# make plot
+p.left <- ggplot(bias_steps.plot, aes(Step, Bias, color = Taxon)) +
+    geom_path(data = ref.left, aes(group = Bias), color = "grey") +
+    geom_quasirandom(width = 0.2) +
+    scale_y_log10(limits = ylimits, labels = log_formatter) +
+    scale_x_discrete(expand = xexpand) +
+    geom_rangeframe(color = "black") +
+    scale_color_manual(values = colors.OkabeIto$Hex, labels = tax_labeller) + 
+    labs(x = "Step", y = "Efficiency / Gm. mean", 
+        title = "Bias of each step") +
+    guides(color = guide_legend(reverse = TRUE)) +
+    base_theme
+## Right panel
+# Tibble for reference line
+ref.right <- tibble(Position = factor(lvls.position, lvls.position), Abundance = 1)
+# make plot
+p.right <- ra_steps %>%
+    ggplot(aes(Position, Abundance, color = Taxon)) +
+    geom_path(data = ref.right, aes(group = Abundance), color = "grey") +
+    geom_path(aes(group = Taxon)) +
+    geom_point() +
+    scale_y_log10(limits = ylimits, breaks = c(0.1, 0.3, 1, 3, 10), 
+        labels = log_formatter) +
+    scale_x_discrete(expand = xexpand) +
+    geom_rangeframe(color = "black") +
+    scale_color_manual(values = colors.OkabeIto$Hex, labels = tax_labeller) + 
+    labs(x = "Position in the workflow", y = "Abundance / Gm. mean", 
+        title = "Composition throughout the workflow") +
+    guides(color = guide_legend(reverse = TRUE)) +
+    base_theme
+```
+
+
+
+```{r}
+l <- get_legend(p.right + theme(legend.position = c(0.45, 0.55), 
+        plot.margin = margin(t=5, b=5)))
+plot_grid(
+    # p.left + theme(plot.margin = margin(l=5, t=5, b=5)),
+    # p.right + theme(plot.margin = margin(t=5, b=5)),
+    p.left,
+    p.right,
+    l,
+    labels = c("A", "B", NULL),
+    nrow = 1, rel_widths = c(1, 1, 0.3))
+```
+
+```{r, include = FALSE, eval = SAVE_FIGURES}
+ggsave(file.path(fig_path, "brooks2015_bias_workflow.png"),
+    width = 8, height = 3, units = "in")
+ggsave(file.path(fig_path, "brooks2015_bias_workflow.pdf"),
+    width = 8, height = 3, units = "in")
+```
+
+
+
+
+
 ## SI plots
 
 Add the copy-number and genome size for comparison purposes
@@ -693,7 +997,7 @@ mappings <- list(
 )
 num_format <- function (x) scales::number(x, accuracy = 0.1)
 plots <- mappings %>%
-    map(~ggplot(bias_steps1, .) + 
+    map(~ggplot_cb(bias_steps1, .) + 
         geom_text(aes(color = Taxon, label = Taxon_abbrev)) +
         base_theme +
         geom_rangeframe()
@@ -770,7 +1074,7 @@ cal <- main0 %>%
 
 Check the reduction in error in proportions,
 ```{r, fig.width = 10, fig.height = 6.5}
-ggplot(cal, aes(Taxon, odds(Estimate) / odds(Actual), 
+ggplot_cb(cal, aes(Taxon, odds(Estimate) / odds(Actual), 
         color = as.factor(Num_species))) +
     geom_quasirandom() +
     scale_y_log10() + 
@@ -844,7 +1148,7 @@ The fits in `fit0` and `fit1` are without and with an intercept term.
 preds.slm <- fits.slm %>%
     gather("Model", "Fit", fit0, fit1) %>%
     unnest(data, map(Fit, broom::augment))
-ggplot(preds.slm, aes(.fitted, Observed, color = Taxon)) +
+ggplot_cb(preds.slm, aes(.fitted, Observed, color = Taxon)) +
     geom_quasirandom() +
     facet_grid(Mixture_type ~ Model) +
     labs(c = "Model prediction")
@@ -852,6 +1156,10 @@ ggplot(preds.slm, aes(.fitted, Observed, color = Taxon)) +
 
 The models are very similar, so we'll use the simpler model (with no intercept
 term) from here on.
+<<<<<<< Updated upstream
+=======
+
+>>>>>>> Stashed changes
 ```{r, fig.height = 6.5, fig.width = 7.5}
 preds.slm <- preds.slm %>%
     filter(Model == "fit0")
@@ -923,7 +1231,7 @@ preds <- left_join(
             `Our model` = "Ours",
         )
     )
-ggplot(preds, aes(logit(Predicted), logit(Observed), color = Taxon)) +
+ggplot_cb(preds, aes(logit(Predicted), logit(Observed), color = Taxon)) +
     geom_abline(intercept = 0, slope = 1, color = "grey") +
     geom_jitter(width = 0.1, height = 0) +
     geom_rangeframe(color = "black") + 
@@ -932,7 +1240,7 @@ ggplot(preds, aes(logit(Predicted), logit(Observed), color = Taxon)) +
     labs(x = "log-odds(Predicted proportion)", 
         y = "log-odds(Observed proportion)") +
     coord_fixed() +
-    scale_color_discrete(labels = tax_labeller) + 
+    scale_color_manual(values = colors.OkabeIto$Hex, labels = tax_labeller) + 
     theme(
         panel.spacing.x = unit(1, "lines"),
         legend.position = "bottom",
