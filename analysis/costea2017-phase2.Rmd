@@ -1,0 +1,486 @@
+---
+title: "Costea2017 Phase 2 analysis"
+author: Michael McLaren
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    self_contained: true
+    highlight: tango
+---
+
+# R setup 
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(progress = TRUE, verbose = TRUE)
+# Global chunk options
+knitr::opts_chunk$set(
+    cache = TRUE, autodep = TRUE,
+    include = TRUE, echo = TRUE,
+    warning = TRUE, message = FALSE, 
+    fig.width = 6, fig.height = 4
+)
+```
+
+Run with `SAVE_FIGURES = TRUE` to save figures in `figures/`. 
+```{r}
+SAVE_FIGURES = TRUE
+```
+
+## Libraries and paths
+
+```{r load_packages}
+library(speedyseq)
+library(here)
+library(tidyverse)
+library(tidyseq)
+library(ggthemes)
+library(cowplot)
+library(ggbeeswarm)
+# This package
+devtools::load_all(here::here())
+```
+
+## Plot setup
+
+Options for `ggplot`:
+```{r}
+base_theme <- theme_tufte() + 
+    theme(
+        text = element_text(size=9, family = ""),
+        legend.position = "none"
+        )
+base_theme0 <- theme_grey() + 
+    theme(
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank()
+        )
+tax_theme <- theme(
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1), 
+        axis.title.x = element_blank())
+
+# update_geom_defaults("point", list(size = 1))
+# update_geom_defaults("text", list(size = 2.5))
+# update_geom_defaults("hline", list(color = "grey"))
+```
+
+```{r}
+costea.shape_scale <- scale_shape_manual(
+    breaks = c("I", "M"), 
+    values = c(16, 1),
+    labels = c("Fecal", "Mock only"))
+
+# Color-blind friendly colors from ColorBrewer2
+colors.protocol <- c(
+    H = "#1b9e77", 
+    W = "#d95f02", 
+    Q = "#7570b3", 
+    Actual = "black")
+```
+
+
+# Data setup
+
+Sample metadata:
+```{r}
+sam <- read_csv(here("data", "costea2017-phases23-sample-data.csv"))
+```
+
+Motus2 profiles
+```{r}
+motus <- read_tsv(
+    here("data", "costea2017-counts.motus"),
+    skip = 2,
+    col_types = cols(.default = col_integer(),
+        `#consensus_taxonomy` = col_character()
+        )
+    ) %>%
+    rename(Taxon = `#consensus_taxonomy`)
+# Rename columns
+new_names <- c("Taxon", 
+    sam$Sample[match(colnames(motus)[-1], 
+        sam$Run_accession)])
+colnames(motus) <- new_names
+```
+
+```{r}
+ps <- phyloseq(tidyseq::otu_table(motus, taxa_are_rows = TRUE),
+    tidyseq::sample_data(sam))
+ps <- t(ps)
+ps <- ps %>%
+    filter_taxa(~ sum(.) > 0)
+```
+
+# Filtering?
+
+```{r}
+taxa_sums(ps) %>% qplot(log = "x") +
+    geom_vline(xintercept = 10)
+```
+
+# What's going on with the duplicates
+
+```{r}
+ps0 <- ps %>%
+    subset_samples(Phase == 2) %>%
+    filter_taxa(~ (sum(.) > 100) & (sum(. > 0) > 5))
+ps0.clr <- ps0 %>%
+    transform_sample_counts(~ clr(. + 0.5))
+```
+
+```{r}
+pcx <- prcomp(otu_table(ps0.clr))
+tb <- as_tibble(pcx$x[,c(1,2)], rownames='Sample') %>%
+    left_join(sam, by = "Sample")
+ggplot(tb, aes(PC1, PC2, color = Protocol, label = paste0(Individual, id))) +
+    geom_text() +
+    facet_grid(Lab ~ .)
+```
+
+
+
+# Minimal e.g. for phase 2
+
+These are what we might want to avoid when doing our comparisons?
+```{r}
+sam %>%
+    filter(Phase == 2, n == 2) %>%
+    group_by(Lab, Protocol, Individual) %>%
+    count
+```
+
+Pick lab 6, where there are no duplicates
+```{r}
+ps0 <- ps %>%
+    subset_samples(Phase == 2 & Lab == 6)
+```
+
+Next, find taxa that are present in both specimens / Individuals
+
+```{r}
+ps0 %>% sample_data %>% as_tibble %>%
+    group_by(Protocol, Individual) %>%
+    count
+```
+
+```{r}
+tb <- ps0 %>% as_tibble %>%
+    mutate_by(Sample, Proportion = close_elts(Abundance)) %>%
+    rename(Reads = Abundance)
+tb0 <- tb %>%
+    gather("Type", "Abundance", Reads, Proportion) %>%
+    group_by(Individual, Taxon, Type) %>%
+    summarize(Mean = mean(Abundance)) %>%
+    unite("Ind_Type", Individual, Type) %>%
+    spread(Ind_Type, Mean)
+```
+```{r}
+tb0 %>%
+    filter(A_Proportion > 1e-2, B_Proportion > 1e-2)
+taxa <- tb0 %>%
+    filter(A_Proportion > 1e-2, B_Proportion > 1e-2, Taxon != "-1") %>%
+    .$Taxon
+ps1 <- ps0 %>%
+    prune_taxa(taxa, .)
+```
+
+compositional PCA:
+```{r}
+ps1.clr <- ps1 %>%
+    transform_sample_counts(~ clr(. + 0.5))
+pcx <- prcomp(otu_table(ps1.clr))
+tb <- as_tibble(pcx$x[,c(1,2)], rownames='Sample') %>%
+    left_join(sam, by = "Sample")
+ggplot(tb, aes(PC1, PC2, color = Protocol, label = Individual)) +
+    geom_text()
+```
+Bias does not look consistent here.
+
+TODO: make a biplot
+
+Relative abundances faceted by specimen, to allow visual comparison of
+differential bias.
+```{r}
+ra <- ps1 %>% as_tibble %>%
+    mutate_by(Sample, Observed = center_elts(Abundance)) %>%
+    mutate(Taxon.fct = fct_reorder(Taxon, Observed))
+ggplot(ra,
+    aes(x = Taxon.fct, y = Observed, color = Protocol)) + 
+    geom_quasirandom(width = 0.2) +
+    geom_rangeframe(color = "black", sides = "b") +
+    scale_color_manual(values = colors.protocol) + 
+    # scale_y_log10(breaks = c(0.003, 1e-2, 1e-1, 1, 10, 30),
+    #     labels = c("3e-3", "1e-2", "0.1", "1", "10", "30")) +
+    scale_y_log10(labels = log_formatter) +
+    scale_x_discrete(labels = tax_labeller) + 
+    facet_grid(. ~ Individual) +
+    # base_theme + 
+    theme_minimal() +
+    coord_flip() +
+    # tax_theme + 
+    theme(legend.position = "right")
+```
+
+I wonder if pairwise ratios could reveal a situation where e.g. one taxon is an
+outlier.
+
+Next - measure differential bias in A and in B, and plot A on the x axis and B
+on the Y axis.
+
+One thing to note about this data is that the abundances of the taxa don't vary
+that much between A and B.
+
+First, average the technical replicates.
+```{r}
+ra0 <- ps1 %>% as_tibble %>%
+    mutate_by(Sample, Observed = center_elts(Abundance)) %>%
+    group_by(Individual, Protocol, Taxon) %>%
+    summarize(Observed = gm_mean(Observed)) %>%
+    spread(Protocol, Observed)
+# ra0 %>%
+#     group_by(Individual) %>%
+#     summarize_at(vars(H, Q, W), gm_mean)
+```
+Then compute differentil bias
+```{r}
+ra0 <- ra0 %>%
+    mutate(HQ = H / Q, HW = H / W, QW = Q / W, WQ = W / Q, WH = W / H)
+```
+
+```{r}
+ra1 <- ra0 %>%
+    select(Individual, Taxon, HQ, QW, HW) %>%
+    gather("Type", "Bias", HQ, QW, HW) %>%
+    spread(Individual, Bias)
+ggplot(ra1, aes(A, B, color = Type)) +
+    geom_abline(color = "darkred") +
+    geom_smooth(aes(group = NA), method = "lm", color = "darkgrey") +
+    geom_point() +
+    coord_fixed() +
+    scale_x_log10() +
+    scale_y_log10() +
+    facet_wrap(~Type) +
+    geom_rangeframe(color = "black") +
+    base_theme
+```
+
+Next may be to use the estimate from A to calibrate B.
+
+Should also try looking at the other labs; not sure what to do with the
+duplicates.
+
+Might also want to use an ILR transform, or look at the pairwise bias
+estimates, as ways to deal with the problem that an unexpected increase in one
+taxon will affect the denominator of all. (Though is this really a problem?)
+
+
+
+## Redo w/ more taxa
+
+```{r}
+tb0 %>%
+    filter(A_Proportion > 2e-3, B_Proportion > 2e-3)
+taxa <- tb0 %>%
+    filter(A_Proportion > 2e-3, B_Proportion > 2e-3, Taxon != "-1") %>%
+    .$Taxon
+ps1 <- ps0 %>%
+    prune_taxa(taxa, .)
+```
+
+compositional PCA:
+```{r}
+ps1.clr <- ps1 %>%
+    transform_sample_counts(~ clr(. + 0.5))
+pcx <- prcomp(otu_table(ps1.clr))
+tb <- as_tibble(pcx$x[,c(1,2)], rownames='Sample') %>%
+    left_join(sam, by = "Sample")
+ggplot(tb, aes(PC1, PC2, color = Protocol, label = Individual)) +
+    geom_text()
+```
+Bias only somewhat consistent.
+
+This is a useful plot though because it shows biological variation on one axis
+and technical on another. Importantly, this pattern depends on which taxa are
+chosen. When the cutoff of 1e-2 was used, protocol W clustered and the other
+two did not. So it is quite complicated.
+
+TODO: create a biplot to see which taxa are the drivers of bias + biological
+differentiation.
+
+TODO: use mOTUs2's SNP / strain profiling to try to see if we can detect
+differences between the strains that are present in A and B for the OTUs that
+don't have consistent bias.
+
+Relative abundances:
+```{r}
+ra <- ps1 %>% as_tibble %>%
+    mutate_by(Sample, Observed = center_elts(Abundance)) %>%
+    mutate(Taxon.fct = fct_reorder(Taxon, Observed))
+ggplot(ra,
+    aes(x = Taxon.fct, y = Observed, color = Protocol)) + 
+    geom_quasirandom(width = 0.2) +
+    geom_rangeframe(color = "black", sides = "b") +
+    scale_color_manual(values = colors.protocol) + 
+    # scale_y_log10(breaks = c(0.003, 1e-2, 1e-1, 1, 10, 30),
+    #     labels = c("3e-3", "1e-2", "0.1", "1", "10", "30")) +
+    scale_y_log10(labels = log_formatter) +
+    scale_x_discrete(labels = tax_labeller) + 
+    facet_grid(. ~ Individual) +
+    # base_theme + 
+    theme_minimal() +
+    coord_flip() +
+    # tax_theme + 
+    theme(legend.position = "right")
+```
+
+I wonder if pairwise ratios could reveal a situation where e.g. one taxon is an
+outlier.
+
+Next - measure differential bias in A and in B, and plot A on the x axis and B
+on the Y axis.
+
+One thing to note about this data is that the abundances of the taxa don't vary
+that much between A and B.
+
+
+### Estimate bias with our point estimator
+
+In this case, since all taxa are in all samples, we should get the same result
+regardless of whether we average the replicates first or pair them up in some
+aribtrary way.
+
+First, average the technical replicates.
+```{r}
+ra0 <- ps1 %>% as_tibble %>%
+    mutate_by(Sample, Observed = center_elts(Abundance)) %>%
+    group_by(Individual, Protocol, Taxon) %>%
+    summarize(Observed = gm_mean(Observed)) %>%
+    spread(Protocol, Observed)
+# ra0 %>%
+#     group_by(Individual) %>%
+#     summarize_at(vars(H, Q, W), gm_mean)
+```
+Then compute differentil bias
+```{r}
+ra0 <- ra0 %>%
+    mutate(HQ = H / Q, HW = H / W, QW = Q / W, WQ = W / Q, WH = W / H)
+```
+
+```{r}
+ra1 <- ra0 %>%
+    select(Individual, Taxon, HQ, QW, HW) %>%
+    gather("Type", "Bias", HQ, QW, HW) %>%
+    spread(Individual, Bias)
+range(ra1$A)
+range(ra1$B)
+ggplot(ra1, aes(A, B)) +
+    geom_hline(yintercept = 1, color = "grey") +
+    geom_vline(xintercept = 1, color = "grey") +
+    geom_abline(color = "darkred") +
+    geom_smooth(aes(group = NA), method = "lm", color = "black") +
+    geom_point() +
+    coord_fixed() +
+    scale_x_log10() +
+    scale_y_log10(limits = c(0.03, 20), oob = scales::squish,
+        expand = ) +
+    facet_wrap(~Type) +
+    # geom_rangeframe(color = "black") +
+    base_theme
+```
+
+TODO is to see what those very problematic points are. The two low points
+are probably the same taxon.
+
+Can label these; then look into them.
+
+Note, the correlation will look worse because of the taxa where bias is not
+consistent, since these are affecting the denominator for the other taxa. If we
+plotted the pairwise bias, we would perhaps get a set of points quite close to
+the dark red line, and a set of points that are all over the place. Should try
+this to check.
+
+
+A good motivation for using this dataset is that it illustrates the range of
+possibilities that we will encounter and issues we will have to deal with going
+forward.
+
+
+
+
+
+
+# DADA2 issue
+
+
+```{r}
+# starting point for example:
+ps <- ps
+sample_data(ps)$Specimen <- sample_data(ps) %>%
+    {paste(.$Lab, .$Protocol, .$Individual, sep = "_")}
+sample_data(ps) <- sample_data(ps)[, c("Specimen", "Protocol")]
+
+samples <- sample_names(ps) %>% head
+ps <- prune_samples(samples, ps)
+
+ps <- ps %>%
+    filter_taxa(~sum(.) > 10)
+
+taxa_names(ps) <- paste0("ASV", 1:ntaxa(ps))
+
+library(phyloseq)
+library(dplyr) # Loaded for the pipe %>%
+
+ps
+#> phyloseq-class experiment-level object
+#> otu_table()   OTU Table:         [ 269 taxa and 6 samples ]
+#> sample_data() Sample Data:       [ 6 samples by 2 sample variables ]
+sample_data(ps)
+#>          Specimen Protocol
+#> B1_188_1    9_Q_B        Q
+#> B1_029     15_W_B        W
+#> B1_187      9_Q_B        Q
+#> A1_047_1    1_Q_A        Q
+#> B1_039_1   15_W_B        W
+#> A1_082_1    1_Q_A        Q
+otu_table(ps)[, 1:5]
+#> OTU Table:          [5 taxa and 6 samples]
+#>                      taxa are columns
+#>          ASV1 ASV2 ASV3 ASV4 ASV5
+#> B1_188_1    0    2    1  408    1
+#> B1_029      8    5    1  177    0
+#> B1_187      4    6    1  358    1
+#> A1_047_1    0    4    6   43    8
+#> B1_039_1    5    2    1   92    1
+#> A1_082_1    2    4    3   66    4
+
+# Merge the samples that have the same Specimen.
+ps.merged <- ps %>%
+    merge_samples(group = "Specimen")
+# Create a matrix of 0s and 1s indicating whether the taxon count should be
+# allowed, or should be set to 0.
+ps.merged.ok <- ps %>%
+    transform_sample_counts(function (x) (x > 0) * 1) %>%
+    merge_samples(group = "Specimen") %>%
+    transform_sample_counts(function (x) (x == 2) * 1)
+# Multiply the counts by the 0-1 matrix
+newotu <- otu_table(ps.merged) * otu_table(ps.merged.ok)
+# The otu_table objects get turned into matrices when you multiply them, so we
+# need to turn newotu back into an otu_table and update the otu_table of
+# ps.merged
+otu_table(ps.merged) <- otu_table(newotu, taxa_are_rows = FALSE)
+otu_table(ps.merged)[, 1:5]
+#> OTU Table:          [5 taxa and 3 samples]
+#>                      taxa are columns
+#>        ASV1 ASV2 ASV3 ASV4 ASV5
+#> 1_Q_A     0    8    9  109   12
+#> 15_W_B   13    7    2  269    0
+#> 9_Q_B     0    8    2  766    2
+sample_data(ps.merged)
+#>        Specimen Protocol
+#> 1_Q_A        NA       NA
+#> 15_W_B       NA       NA
+#> 9_Q_B        NA       NA
+```
+
