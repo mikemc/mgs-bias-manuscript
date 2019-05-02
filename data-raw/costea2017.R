@@ -310,3 +310,8 @@ all(file.exists(fns))
 #> FLIST=$(echo ERR*-counts.motus | tr ' ' ,)
 #> motus merge -i $FLIST -o costea2017-counts.motus
 
+# Get commands for calling mOTUs2 map_snv
+
+accs %>%
+    paste("sbatch costea2017-motus2-map_snv.sh", .) %>%
+    write_lines(here("data-raw", "sbatch-motus2-map_snv.sh"))
