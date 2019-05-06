@@ -2,6 +2,7 @@
 
 export("%>%")
 export(anorm)
+export(build_matrix)
 export(center_elts)
 export(close_elts)
 export(clr)

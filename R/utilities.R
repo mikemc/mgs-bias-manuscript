@@ -12,7 +12,7 @@ corner <- function (x, r = 5L, c = 5L) {
 }
 
 
-# Tidy helpers ---------------------------------------------------------------
+# Helpers for working with "tidy" microbiome data -----------------------------
 
 #' Mutate within groups
 #'
@@ -25,11 +25,28 @@ mutate_by <- function(.data, group_vars, ...) {
         ungroup
 }
 
-# mutate_by_alt <- function(.data, group_var, ...) {
-#     group_var <- rlang::enquo(group_var)
-#     .data %>%
-#         group_by(!!group_var) %>%
-#         mutate(...) %>%
-#         ungroup
-# }
-
+#' Create a matrix from columns of a tidy data frame
+#'
+#' Note: Setting `fill` will replace NAs and NaNs, along with elements
+#' corresponding to missing rows, with the value of `fill`.
+#'
+#' @param .data A data frame with columns `rows`, `cols`, and `elts`.
+#' @param rows Column that will become the rownames of the matrix.
+#' @param cols Column that will become the rownames of the matrix.
+#' @param elts Column that will become the matrix elements.
+#' @param fill Value to use for missing elements.
+#' @export
+build_matrix <- function(.data, rows, cols, elts, fill = NULL) {
+    rows <- rlang::enquo(rows)
+    cols <- rlang::enquo(cols)
+    elts <- rlang::enquo(elts)
+    tb <- .data %>% select(!!rows, !!cols, !!elts)
+    if (!is.null(fill)) {
+        tb <- tb %>% 
+            complete(!!rows, !!cols, fill = rlang::list2(!!elts := fill))
+    }
+    tb <- tb %>% spread(!!cols, !!elts)
+    mat <- tb %>% select(-!!rows) %>% as("matrix")
+    rownames(mat) <- tb %>% pull(!!rows)
+    mat
+}
