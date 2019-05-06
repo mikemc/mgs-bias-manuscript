@@ -598,7 +598,7 @@ geometric mean of taxa,
 ```{r}
 bias %>%
     group_by(Protocol) %>%
-    summarize(g_mean(Bias))
+    summarize(gm_mean(Bias))
 ```
 so that the elements (relative efficiencies) can be interpreted as the
 detection efficiency relative to the average taxon for that protocol.

@@ -623,8 +623,8 @@ bias_steps0 <- bias_steps %>%
 bias_steps_summary <- bias_steps0 %>%
     group_by(Type) %>%
     summarize(
-        `Gm. range` = g_range(Bias),
-        `Gm. std. dev.` = g_sd(Bias),
+        `Gm. range` = gm_range(Bias),
+        `Gm. std. dev.` = gm_sd(Bias),
     ) %>%
     gather("Statistic", "Value", -Type)
 bias_steps0 <- bind_rows(

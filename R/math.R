@@ -20,30 +20,30 @@ logit <- function (x) {
 
 # Summaries of relative abundance vectors--------------------------------------
 
-#' Geometric mean of x.
+#' Geometric mean of x
 #'
 #' @export
-g_mean <- function(x, na_rm = FALSE) {
+gm_mean <- function(x, na_rm = FALSE) {
     exp(mean(log(x), na.rm = na_rm))
 }
 
-#' Geometric standard deviation of x.
+#' Geometric standard deviation of x
 #'
 #' Note, uses denominator n-1
 #'
 #' @export
-g_sd <- function(x, na_rm = FALSE) {
+gm_sd <- function(x, na_rm = FALSE) {
     exp(sd(log(x), na.rm = na_rm))
 }
 
-#' Geometric range of x.
+#' Geometric range of x
 #'
 #' @export
-g_range <- function(x) {
+gm_range <- function(x) {
     max(x) / min(x)
 }
 
-#' Shannon entropy of x.
+#' Shannon entropy of x
 #'
 #' @export
 entropy <- function (x) {

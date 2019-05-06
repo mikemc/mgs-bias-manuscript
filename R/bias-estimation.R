@@ -48,7 +48,7 @@ estimate_bias <- function(tb, method = "rss", bound = 10) {
     } else if (method == "center") {
         bias_tb <- tb %>%
             group_by(Taxon) %>%
-            summarize(Bias = g_mean(Observed / Actual))
+            summarize(Bias = gm_mean(Observed / Actual))
     }
     bias_tb %>% 
         mutate(Bias = center_elts(Bias)) %>%

@@ -2,10 +2,10 @@
 % Please edit documentation in R/math.R
 \name{entropy}
 \alias{entropy}
-\title{Shannon entropy of x.}
+\title{Shannon entropy of x}
 \usage{
 entropy(x)
 }
 \description{
-Shannon entropy of x.
+Shannon entropy of x
 }
