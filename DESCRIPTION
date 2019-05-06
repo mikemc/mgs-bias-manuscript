@@ -26,6 +26,8 @@ Suggests:
     ggbeeswarm,
     knitr,
     kableExtra,
+    MASS,
     rmarkdown,
-    usethis
+    usethis,
+    testthat
 VignetteBuilder: knitr
