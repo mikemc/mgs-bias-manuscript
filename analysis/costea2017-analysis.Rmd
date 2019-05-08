@@ -26,18 +26,18 @@ knitr::opts_chunk$set(
 Run with `SAVE_FIGURES = TRUE` to save figures in `figures/`. 
 ```{r}
 SAVE_FIGURES = TRUE
-fig_path <- file.path(here::here(), "figures")
 ```
 
 ## Libraries and paths
 
 ```{r load_packages}
+library(here)
 library(tidyverse)
 library(ggthemes)
 library(cowplot)
 library(ggbeeswarm)
 # This package
-devtools::load_all(here::here())
+devtools::load_all(here())
 ```
 
 ## Plot setup
@@ -571,12 +571,12 @@ plot_grid(p.comp, p.step, labels = c("A", "B"))
 ```
 
 ```{r, include = FALSE, eval = SAVE_FIGURES}
-# ggsave(file.path(here::here(), "figures", "costea2017_2panel.svg"),
+# ggsave(here("figures", "costea2017_2panel.svg"),
 #     width = 7, height = 3.5, units = "in", scale = 4/3)
-ggsave(file.path(here::here(), "figures", "costea2017_2panel.png"),
+ggsave(here("figures", "costea2017_2panel.png"),
     width = 7, height = 3.5, units = "in", dpi = 300, scale = 4/3)
-ggsave(file.path(here::here(), "figures", "costea2017_2panel.pdf"),
-    width = 7, height = 3.5, units = "in", scale = 4/3)
+ggsave(here("figures", "costea2017_2panel.pdf"),
+    width = 7, height = 3.5, units = "in", scale = 4/3, useDingbats = FALSE)
 ```
 
 # Estimate bias
@@ -933,10 +933,10 @@ plot_grid(p.step.cal,
 ```
 
 ```{r, include = FALSE, eval = SAVE_FIGURES}
-ggsave(file.path(fig_path, "costea2017_calibration.png"),
+ggsave(here("figures", "costea2017_calibration.png"),
     width = 6.5, height = 6.5, units = "in")
-ggsave(file.path(fig_path, "costea2017_calibration.pdf"),
-    width = 6.5, height = 6.5, units = "in")
+ggsave(here("figures", "costea2017_calibration.pdf"),
+    width = 6.5, height = 6.5, units = "in", useDingbats = FALSE)
 ```
 
 # Session info

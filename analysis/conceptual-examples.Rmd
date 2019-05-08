@@ -22,17 +22,13 @@ knitr::opts_chunk$set(cache=TRUE, autodep = TRUE,
 ```
 
 ```{r load_packages}
+library(here)
 library(tidyverse)
 library(ggthemes)
 # library(cowplot)
 # library(ggbeeswarm)
 # This package
-devtools::load_all(here::here())
-```
-
-```{r set_paths}
-fig_path <- file.path(here::here(), "figures")
-data_path <- file.path(here::here(), "data")
+devtools::load_all(here())
 ```
 
 ```{r plot_setup}
@@ -169,8 +165,8 @@ ggplot(tb, aes(x = Sample, y = Proportion, fill = Taxon)) +
 ```
 
 ```{r, include = FALSE, eval = FALSE}
-ggsave(file.path(fig_path, "community_clustering.pdf"),
-    width = 3, height = 2.5, units = "in")
+ggsave(here("figures", "community_clustering.pdf"),
+    width = 3, height = 2.5, units = "in", useDingbats = FALSE)
 ```
 
 From this figure, it is apparent that Sample S1 is the most even and thus has

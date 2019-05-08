@@ -26,18 +26,18 @@ knitr::opts_chunk$set(
 Run with `SAVE_FIGURES = TRUE` to save figures in `figures/`. 
 ```{r}
 SAVE_FIGURES = TRUE
-fig_path <- file.path(here::here(), "figures")
 ```
 
 ## Libraries and paths
 
 ```{r load_packages}
+library(here)
 library(tidyverse)
 library(ggthemes)
 library(cowplot)
 library(ggbeeswarm)
 # This package
-devtools::load_all(here::here())
+devtools::load_all(here())
 ```
 
 Options for `ggplot`:
@@ -386,10 +386,10 @@ p.pw +
     theme(legend.position = "right")
 ```
 ```{r, include = FALSE, eval = SAVE_FIGURES}
-ggsave(file.path(fig_path, "brooks2015_ratios_full.png"),
+ggsave(here("figures", "brooks2015_ratios_full.png"),
     width = 6.5, height = 6.5, units = "in")
-ggsave(file.path(fig_path, "brooks2015_ratios_full.pdf"),
-    width = 6.5, height = 6.5, units = "in")
+ggsave(here("figures", "brooks2015_ratios_full.pdf"),
+    width = 6.5, height = 6.5, units = "in", useDingbats = FALSE)
 ```
 
 Get the prediction of our measurements given the estimated bias. For
@@ -448,10 +448,10 @@ p
 ```
 
 ```{r, include = FALSE, eval = SAVE_FIGURES}
-ggsave(file.path(fig_path, "brooks2015_proportions_full.png"),
+ggsave(here("figures", "brooks2015_proportions_full.png"),
     width = 6.5, height = 6.5, units = "in")
-ggsave(file.path(fig_path, "brooks2015_proportions_full.pdf"),
-    width = 6.5, height = 6.5, units = "in")
+ggsave(here("figures", "brooks2015_proportions_full.pdf"),
+    width = 6.5, height = 6.5, units = "in", useDingbats = FALSE)
 ```
 
 ## Main text 4-panel figure
@@ -590,9 +590,9 @@ plot_grid(row1, row2, ncol=1, rel_heights = c(1, 1.1))
 ```
 
 ```{r, include = FALSE, eval = SAVE_FIGURES}
-ggsave(file.path(fig_path, "brooks2015_4panel.pdf"),
-    width = 6.5, height = 5.5, units = "in", scale = 4/3)
-ggsave(file.path(fig_path, "brooks2015_4panel.png"),
+ggsave(here("figures", "brooks2015_4panel.pdf"),
+    width = 6.5, height = 5.5, units = "in", scale = 4/3, useDingbats = FALSE)
+ggsave(here("figures", "brooks2015_4panel.png"),
     width = 6.5, height = 5.5, units = "in", scale = 4/3)
 ```
 
@@ -714,7 +714,7 @@ plot_grid(plotlist = plots[1:3], nrow = 1, labels = "AUTO")
 ```
 
 ```{r, include = FALSE, eval = SAVE_FIGURES}
-ggsave(file.path(fig_path, "brooks2015_bias_steps.png"),
+ggsave(here("figures", "brooks2015_bias_steps.png"),
     width = 6.5, height = 2.0, units = "in")
 ```
 
@@ -724,7 +724,7 @@ plot_grid(plotlist = plots[4:6], nrow = 1, labels = "AUTO")
 ```
 
 ```{r, include = FALSE, eval = SAVE_FIGURES}
-ggsave(file.path(fig_path, "brooks2015_bias_cn.png"),
+ggsave(here("figures", "brooks2015_bias_cn.png"),
     width = 6.5, height = 2.0, units = "in")
 ```
 
@@ -948,10 +948,10 @@ preds %>%
 ```
 
 ```{r, include = FALSE, eval = SAVE_FIGURES}
-ggsave(file.path(fig_path, "model_comparison.png"),
+ggsave(here("figures", "model_comparison.png"),
     width = 6.5, height = 6.5, units = "in")
-ggsave(file.path(fig_path, "model_comparison.pdf"),
-    width = 6.5, height = 6.5, units = "in")
+ggsave(here("figures", "model_comparison.pdf"),
+    width = 6.5, height = 6.5, units = "in", useDingbats = FALSE)
 ```
 
 # Session info
