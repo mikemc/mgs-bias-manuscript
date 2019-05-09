@@ -1,0 +1,375 @@
+---
+title: "Brooks2015 species information"
+author: Michael McLaren
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    self_contained: true
+    highlight: tango
+---
+
+# R setup 
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(progress = TRUE, verbose = TRUE)
+# Global chunk options
+knitr::opts_chunk$set(
+    cache = TRUE, autodep = TRUE,
+    include = TRUE, echo = TRUE,
+    warning = TRUE, message = FALSE, 
+    fig.width = 8, fig.height = 6
+)
+```
+
+Run with `SAVE_FIGURES = TRUE` to save figures in `figures/`. 
+```{r}
+SAVE_FIGURES = TRUE
+```
+
+## Libraries and paths
+
+```{r load_packages}
+library(here)
+library(tidyverse)
+library(ggthemes)
+library(cowplot)
+library(ggbeeswarm)
+library(ape)
+library(ggtree)
+library(tidytree)
+
+# This package
+devtools::load_all(here())
+```
+
+Path where the rrnDB and GTDB data are stored:
+```{r}
+dotenv::load_dot_env(here("data-raw", ".env"))
+data_path <- Sys.getenv("DATA_PATH")
+```
+
+# GTDB and rrnDB setup
+
+```{r}
+species <- c("Gardnerella_vaginalis", "Atopobium_vaginae",
+    "Lactobacillus_crispatus", "Lactobacillus_iners",
+    "Prevotella_bivia", "Sneathia_amnii", "Streptococcus_agalactiae") %>%
+    str_replace("_", " ")
+```
+
+Load the GTDB metadata and tree
+```{r}
+tree <- ape::read.tree(file.path(data_path, "gtdb", "bac120_r86.2.tree"))
+gtdb_spec <- cols(
+    ssu_gg_blast_bitscore = col_double(),
+    ssu_silva_blast_bitscore = col_double()
+)
+gtdb <- read_tsv(
+    file.path(data_path, "gtdb", "bac_metadata_r86.tsv"),
+    col_types = gtdb_spec,
+    na = c("", "NA", "none")
+)
+# We just want the NCBI reference and representative genomes for the mock taxa.
+# We can match against the species recorded in the ncbi_taxonomy string
+gtdb <- gtdb %>%
+    mutate(ncbi_species = str_extract(ncbi_taxonomy, "(?<=s__).+"))
+```
+Get the info for the Brooks2015 species from refseq genomes,
+```{r}
+gtdb.brooks <- gtdb %>%
+    filter(ncbi_species %in% species) %>%
+    filter(ncbi_refseq_category %in% 
+        c("reference genome", "representative genome")) %>%
+    select(ncbi_species, ncbi_ssu_count, ncbi_total_length,
+        ncbi_refseq_category, accession, ncbi_taxonomy) %>%
+    arrange(ncbi_species)
+```
+
+Load the rrnDB:
+```{r}
+rrn <- read_tsv(file.path(data_path, "rrndb", "rrnDB-5.5.tsv.zip")) %>%
+    janitor::clean_names()
+rrn <- rrn %>%
+    mutate(ncbi_species = str_extract(ncbi_scientific_name, "[^ ]+ [^ ]+"))
+```
+Get the info for the Brooks2015 species
+```{r}
+rrn.brooks <- rrn %>%
+    filter(ncbi_species %in% species) %>%
+    select(ncbi_species, x16s_gene_count, everything()) %>%
+    arrange(ncbi_species)
+```
+
+# Genome statistics
+
+## NCBI genome lengths and 16S copy numbers
+
+```{r}
+gtdb.brooks %>%
+    select(ncbi_species, ncbi_ssu_count, ncbi_total_length,
+        ncbi_refseq_category)
+```
+NCBI annotations of 1 16S copy may just mean that the genome assemblies did not
+properly separate out the different 16S copies, so some further investigation
+of A. vaginae and L. iners in particular is warranted.
+
+## rrnDB: 16S copy number
+
+```{r}
+rrn.brooks %>% 
+    group_by(ncbi_species) %>% 
+    summarize_at("x16s_gene_count", 
+        list(n = length, mean = mean, median = median, min = min, max = max))
+```
+These look like reliable numbers for these three species, and agree with the
+ncbi annotations.
+
+## Yuan2012: 16S copy numbers
+
+Yuan S, Cohen DB, Ravel J, Abdo Z, Forney LJ. 2012. Evaluation of Methods for
+the Extraction and Purification of DNA from the Human Microbiome. PLoS One
+7:e33865.
+
+They determined copy numbers for Atopobium vaginae and Lactobacillus iners by
+pulse-field gel electrophoresis and found
+
+| Species             | 16s CN |
+|:--------------------|-------:|
+| Atopobium vaginae   |      2 |
+| Lactobacillus iners |      5 |
+
+(see their Table 4 and Methods)
+
+## Check relatives in the rrnDB
+
+
+```{r}
+gtdb %>%
+    group_by(is.na(ncbi_species)) %>%
+    count
+```
+tree w/ tips that have NCBI species
+```{r}
+tree.ncbi <- gtdb %>%
+    filter(!is.na(ncbi_species)) %>%
+    {intersect(.$accession, tree$tip.label)} %>%
+    keep.tip(tree, .)
+```
+
+
+
+### Lactobacillus
+
+Get a tree corresponding to the clade of the MRCA of L. crispatus and L. iners,
+```{r}
+tree.lacto <- gtdb %>%
+    filter(ncbi_species %in% 
+        paste("Lactobacillus", c("iners", "crispatus"))) %>%
+    {intersect(.$accession, tree$tip.label)} %>%
+    getMRCA(tree.ncbi, .) %>%
+    extract.clade(tree.ncbi, .)
+```
+Let's take a look at how L. iners and L. crisp fall on the tree:
+```{r, fig.height = 8}
+gtb <- gtdb %>%
+    select(taxa = accession, ncbi_species) %>%
+    filter(taxa %in% tree.ncbi$tip.label) %>%
+    mutate(species_abbrev = str_replace(ncbi_species, "Lactobacillus", "L."))
+g <- ggtree(tree.lacto) %<+% gtb
+g + geom_tiplab(aes(label = species_abbrev, 
+        color = str_detect(species_abbrev, "crispatus|iners"))) +
+    xlim(0, 0.29)
+```
+
+These groupings of L. iners and L. crispatus agree with those of Duar2017
+(Figure 2).
+
+Next, we will look for nearby species in the rrnDB. For L iners, let's define
+an "L. iners group" consisting of all species descending from the MRCA of L.
+iners and L. gasseri,
+```{r}
+td <- as_tibble(tree.lacto) %>%
+    left_join(gtb %>% rename(label = taxa), by = "label")
+mrca.iners_group <- td %>%
+    filter(str_detect(ncbi_species, "iners|gasseri")) %>%
+    group_by(ncbi_species) %>%
+    top_n(1, label) %>%
+    .$label %>%
+    {MRCA(td, .[[1]], .[[2]])} %>%
+    .$node
+species.iners_group <- offspring(td, mrca.iners_group) %>%
+    filter(!is.na(ncbi_species)) %>%
+    .$ncbi_species %>%
+    unique
+species.iners_group 
+```
+Check the copy numbers of these species in the rrnDB:
+```{r}
+rrn.iners_group <- rrn %>%
+    filter(ncbi_species %in% species.iners_group) %>%
+    select(ncbi_scientific_name, x16s_gene_count, evidence) %>%
+    arrange(ncbi_scientific_name)
+rrn.iners_group %>%
+    print(n=Inf)
+rrn.iners_group %>% 
+    summarize_at("x16s_gene_count", 
+        list(n = length, mean = mean, median = median, min = min, max = max))
+```
+These numbers are consistent with the number of the CN of 5 found in Yuan2012.
+Given that L. iners is quite distant from its relatives, I will go with the
+estimate of 5 for L. iners determined experimentally by Yuan2012.
+
+Now let's do the same for L. crispatus, defining its group somewhat broadly to
+include all descendants of the MRCA of crispatus with acidophilus,
+```{r}
+mrca.crisp_group <- td %>%
+    filter(str_detect(ncbi_species, "crispatus|acidophilus")) %>%
+    group_by(ncbi_species) %>%
+    top_n(1, label) %>%
+    .$label %>%
+    {MRCA(td, .[[1]], .[[2]])} %>%
+    .$node
+species.crisp_group <- offspring(td, mrca.crisp_group) %>%
+    filter(!is.na(ncbi_species)) %>%
+    .$ncbi_species %>%
+    unique
+species.crisp_group 
+```
+Check the copy numbers of these species in the rrnDB:
+```{r}
+rrn.crisp_group <- rrn %>%
+    filter(ncbi_species %in% species.crisp_group) %>%
+    select(ncbi_scientific_name, x16s_gene_count, evidence) %>%
+    arrange(ncbi_scientific_name)
+rrn.crisp_group %>%
+    print(n=Inf)
+rrn.crisp_group %>% 
+    summarize_at("x16s_gene_count", 
+        list(n = length, mean = mean, median = median, min = min, max = max))
+```
+These numbers are consistent with the estimate of 4 from the NCBI genome
+annotation.
+
+### Prevotella bivia
+
+Tree of the clade containing all "Prevotella" NCBI genomes:
+```{r}
+tree.prevo <- gtdb %>%
+    filter(str_detect(ncbi_species, "Prevotella")) %>%
+    {intersect(.$accession, tree$tip.label)} %>%
+    getMRCA(tree.ncbi, .) %>%
+    extract.clade(tree.ncbi, .)
+```
+Check where P. bivia falls:
+```{r, fig.height = 10}
+g <- ggtree(tree.prevo) %<+% gtb
+g + geom_tiplab(aes(label = ncbi_species, 
+        color = str_detect(ncbi_species, "bivia"))) +
+    xlim(0, 0.52)
+```
+
+So we can use the MRCA of P. bivia and P. melaninogenica to get a set of
+related species to query the rrnDB.
+```{r}
+td <- as_tibble(tree.prevo) %>%
+    left_join(gtb %>% rename(label = taxa), by = "label")
+mrca.pbi_group <- td %>%
+    filter(str_detect(ncbi_species, "Prevotella (bivia|melaninogenica)")) %>%
+    group_by(ncbi_species) %>%
+    top_n(1, label) %>%
+    .$label %>%
+    {MRCA(td, .[[1]], .[[2]])} %>%
+    .$node
+species.pbi_group <- offspring(td, mrca.pbi_group) %>%
+    filter(!is.na(ncbi_species)) %>%
+    .$ncbi_species %>%
+    unique
+species.pbi_group
+```
+Check the copy numbers of these species in the rrnDB:
+```{r}
+rrn.pbi_group <- rrn %>%
+    filter(ncbi_species %in% species.pbi_group) %>%
+    select(ncbi_scientific_name, x16s_gene_count, evidence) %>%
+    arrange(ncbi_scientific_name)
+rrn.pbi_group %>%
+    print(n=Inf)
+rrn.pbi_group %>% 
+    summarize_at("x16s_gene_count", 
+        list(n = length, mean = mean, median = median, min = min, max = max))
+```
+These numbers are consistent with the estimate of 4 from the refseq genome.
+
+### Atopobium vaginae
+
+Tree of the clade containing all "Atopobium" NCBI genomes:
+```{r}
+tree.atopo <- gtdb %>%
+    filter(str_detect(ncbi_species, "Atopobium")) %>%
+    {intersect(.$accession, tree$tip.label)} %>%
+    getMRCA(tree.ncbi, .) %>%
+    extract.clade(tree.ncbi, .)
+```
+Check where A. vaginae falls:
+```{r}
+g <- ggtree(tree.atopo) %<+% gtb
+g + geom_tiplab(aes(label = ncbi_species, 
+        color = str_detect(ncbi_species, "vaginae"))) +
+    xlim(0, 0.45)
+```
+
+Check for any of these three genera in the rrnDB,
+```{r}
+avag_pat <- "Atopobium|Olsenella|Olegusella"
+rrn %>%
+    filter(str_detect(ncbi_scientific_name, avag_pat)) %>%
+    select(ncbi_scientific_name, x16s_gene_count, evidence) %>%
+    arrange(ncbi_scientific_name) %>%
+    print(n=Inf)
+```
+These results suggest that a value of 1-2 is reasonable, but leave it pretty
+ambiguous which is better. Since the value of 1 in the NCBI annotation for A.
+vaginae could be an assembly or annotation error, I will go with the larger
+value of 2 found by Yuan2012.
+
+## Final table
+
+```{r}
+copy_number <- tribble(
+    ~Taxon,                     ~Copy_number,
+    "Atopobium_vaginae",                   2,
+    "Gardnerella_vaginalis",               2,
+    "Lactobacillus_crispatus",             4,   
+    "Lactobacillus_iners",                 5,
+    "Prevotella_bivia",                    4,
+    "Sneathia_amnii",                      3,
+    "Streptococcus_agalactiae",            7,
+    )
+genome_size <- gtdb.brooks %>%
+    group_by(Taxon = ncbi_species) %>%
+    summarize(Genome_size = mean(ncbi_total_length)) %>%
+    mutate(Taxon = str_replace(Taxon, " ", "_")) 
+brooks2015_species_info <- left_join(genome_size, copy_number, by = "Taxon")
+brooks2015_species_info
+```
+Save for use in the main analysis:
+```{r}
+usethis::use_data(brooks2015_species_info, overwrite = TRUE)
+```
+Also make a latex version for use as a supplemental table,
+```{r, eval = F}
+tex <- brooks2015_species_info %>%
+    mutate(
+        # Taxon = str_replace(Taxon, "[a-z]+_", ". "),
+        Taxon = str_replace(Taxon, "_", " "),
+        Taxon = kableExtra::cell_spec(Taxon, "latex", italic = TRUE),
+        Genome_size = round(Genome_size / 1e6, 2)
+        ) %>%
+    rename(`Genome size (Mbp)` = Genome_size, `Copy number` = Copy_number) %>%
+    # mutate_at(vars(-Taxon), as.character) %>%
+    knitr::kable(format="latex", booktabs = TRUE, linesep = "",
+        escape = FALSE, align = c("l", "r", "r"))
+tex
+```

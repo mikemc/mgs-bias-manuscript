@@ -1,4 +1,5 @@
 library(tidyverse)
+library(here)
 
 # Download needed files from the supplement of Brooks2015, available at
 # https://bmcmicrobiol.biomedcentral.com/articles/10.1186/s12866-015-0351-6
@@ -155,55 +156,27 @@ usethis::use_data(brooks2015_counts, brooks2015_sample_data)
 # write_csv(actual, "/tmp/brooks2015-actual.csv")
 # write_csv(brooks2015_sample_data, "/tmp/brooks2015-sample-data.csv")
 
-# Species info ----------------------------------------------------------------
+# Download GTDB and rrnDB -----------------------------------------------------
 
-# We also need 16S copy-number and genome length, which we'll from NCBI RefSeq
-# genomes. An easy way to get these numbers from the NCBI RefSeq annotations is
-# from the strain metadata table from the GTDB (Genome Taxonomy Database).
-gtdb_spec <- cols(
-    ssu_gg_blast_bitscore = col_double(),
-    ssu_silva_blast_bitscore = col_double()
-)
-gtdb <- read_tsv(
-    "https://data.ace.uq.edu.au/public/gtdb/release86/bac_metadata_r86.tsv",
-    col_types = gtdb_spec,
-    na = c("", "NA", "none")
-)
-# We just want the NCBI reference and representative genomes for the mock taxa.
-# We can match against the species recorded in the ncbi_taxonomy string
-gtdb <- gtdb %>%
-    mutate(ncbi_species = str_extract(ncbi_taxonomy, "(?<=s__)[\\w ]+"))
-species_list <- mock_taxa$Taxon %>% str_replace("_", " ")
-gtdb0 <- gtdb %>%
-    filter(ncbi_species %in% species_list)
-gtdb1 <- gtdb0 %>%
-    filter(ncbi_refseq_category %in% c("reference genome", "representative genome"))
-tb <- gtdb1 %>%
-    select(ncbi_species, ncbi_ssu_count, ncbi_total_length,
-        accession, ncbi_refseq_category, ncbi_taxonomy) %>%
-    arrange(ncbi_species)
-tb %>% select(-ncbi_taxonomy) %>% knitr::kable(format = "pandoc")
-# 
-# 
-# ncbi_species                ncbi_ssu_count   ncbi_total_length  accession            ncbi_refseq_category  
-# -------------------------  ---------------  ------------------  -------------------  ----------------------
-# Atopobium vaginae                        1             1449613  RS_GCF_000179715.1   representative genome 
-# Atopobium vaginae                        1             1430526  RS_GCF_000159235.2   representative genome 
-# Gardnerella vaginalis                    2             1667350  RS_GCF_000159155.2   reference genome      
-# Gardnerella vaginalis                    2             1617545  RS_GCF_000025205.1   representative genome 
-# Lactobacillus crispatus                  4             2043161  RS_GCF_000091765.1   representative genome 
-# Lactobacillus iners                      1             1277649  RS_GCF_000160875.1   representative genome 
-# Prevotella bivia                         4             2521238  RS_GCF_000262545.1   representative genome 
-# Sneathia amnii                           3             1330224  RS_GCF_000973085.1   representative genome 
-# Streptococcus agalactiae                 7             2160267  RS_GCF_000007265.1   reference genome      
+# For our analysis of 16S copy numbers we will make use of the GTDB tree and
+# metadata table, and the rrnDB table of 16S copy numbers linked to NCBI
+# species names. Here we simply download these files, to be used later in in
+# the Rmd document `analysis/brooks2015_species_info.Rmd`
 
-brooks2015_species_info <- tb %>%
-    rename(Taxon = ncbi_species, Copy_number = ncbi_ssu_count, 
-        Genome_size = ncbi_total_length, Accession = accession, 
-        RefSeq_category = ncbi_refseq_category,
-        NCBI_taxonomy = ncbi_taxonomy) %>%
-    mutate(
-        Taxon = str_replace(Taxon, " ", "_"),
-        Accession = str_extract(Accession, "(?<=RS_).+")
-    )
-usethis::use_data(brooks2015_species_info)
+dotenv::load_dot_env(here("data-raw", ".env"))
+data_path <- Sys.getenv("DATA_PATH")
+
+# GTDB
+dir.create(file.path(data_path, "gtdb"))
+urls <- c(
+    "https://data.ace.uq.edu.au/public/gtdb/release86/bac120_r86.2.tree",
+    "https://data.ace.uq.edu.au/public/gtdb/release86/bac_metadata_r86.tsv"
+)
+fns <- file.path(data_path, "gtdb", basename(urls))
+walk2(urls, fns, download.file)
+
+# rrnDB
+dir.create(file.path(data_path, "rrndb"))
+urls <- c("https://rrndb.umms.med.umich.edu/static/download/rrnDB-5.5.tsv.zip")
+fns <- file.path(data_path, "rrndb", basename(urls))
+walk2(urls, fns, download.file)

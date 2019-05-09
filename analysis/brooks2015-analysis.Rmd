@@ -34,7 +34,7 @@ SAVE_FIGURES = TRUE
 library(here)
 library(tidyverse)
 library(ggthemes)
-library(cowplot)
+library(cowplot); theme_set(theme_grey()) 
 library(ggbeeswarm)
 # This package
 devtools::load_all(here())
@@ -149,24 +149,16 @@ main <- main %>%
 
 ## Species info
 
-Estimated genome size and 16S copy number.
+Estimated genome size and 16S copy number, obtained in
+`analysis/brooks2015-species-info.Rmd`.
 ```{r}
-brooks2015_species_info %>% 
-    select(Taxon, Copy_number, Genome_size, Accession, RefSeq_category)
+species_info <- brooks2015_species_info
+taxa <- species_info$Taxon
+species_info
 ```
-We want just one row per species.  For A. vaginae and G. vaginalis, have two
-genomes, but with the same copy-number and similar genome size, so will simply
-average the genome size:
+Expected copy-number bias for the three experiments:
 ```{r}
-sinfo <- brooks2015_species_info %>%
-    group_by(Taxon) %>%
-    summarize_at(vars(Genome_size, Copy_number), mean)
-taxa <- sinfo$Taxon
-print(sinfo)
-```
-Copy-number bias for the three experiments
-```{r}
-cnbias <- sinfo %>%
+cnbias <- species_info %>%
     expand(Mixture_type = sam$Mixture_type, 
         nesting(Taxon, Genome_size, Copy_number)) %>%
     mutate(CN_bias = case_when(
@@ -664,7 +656,7 @@ tex
 Add the copy-number and genome size for comparison purposes
 ```{r}
 bias_steps1 <- bias_steps %>%
-    left_join(sinfo, by = "Taxon")
+    left_join(species_info, by = "Taxon")
 ```
 
 Get abbreviations for each species labeling plot points.
