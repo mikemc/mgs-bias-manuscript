@@ -16,6 +16,7 @@ LazyData: false
 RoxygenNote: 6.1.1
 Imports:
     magrittr,
+    MASS,
     tidyverse
 Suggests: 
     cowplot,
@@ -26,7 +27,6 @@ Suggests:
     ggbeeswarm,
     knitr,
     kableExtra,
-    MASS,
     rmarkdown,
     usethis,
     testthat
