@@ -223,34 +223,70 @@ st0 <- st %>%
 
 # Composition of the samples
 
-## Identifying contaminants
+## What fraction of each sample is `Genus_unclassified`?
 
-Costea et al report seeing E coli as a putative contaminant of the spike-in. We
-can check by seeing what we find in the mock-only samples that shouldn't be
-there:
 ```{r}
 st0 %>%
+    filter(str_detect(Species, "unclassified")) %>%
+    group_by(Protocol, Individual) %>%
+    summarize_at(vars(Abundance), sum) %>%
+    spread(Protocol, Abundance)
+```
+
+
+## Identifying contaminants
+
+What is in the mock-only samples that shouldn't be?
+```{r}
+tb <- st0 %>%
     filter(
         Individual == "M", Abundance > 0, 
         !(Taxon %in% mock$Taxon)
         ) %>%
-    group_by(Taxon) %>%
+    group_by(Family, Taxon) %>%
     summarize(
         Mean = mean(Abundance),
         Max = max(Abundance),
         ) %>%
-    arrange(desc(Mean)) %>%
-    print(n = 10)
+    filter(Max > 1e-4) %>%
+    arrange(desc(Mean))
+tb
 ```
-It looks like the contaminant reads are mostly captured by `Shigella_flexneri`
-and `Escherichia_unclassified`, with possibly some as `Escherichia_coli`. 
-We will use these identifiers as putative contaminants.
+Costea et al report E. coli as a putative lab contaminant of the spike-in. It
+looks like the contaminant reads are being captured by the `Shigella_flexneri`
+identifier, with `Escherichia_coli` and `Escherichia_unclassified` perhaps also
+picking up some contaminant reads. Also, it appears that
+`Salmonella_unclassified` is getting some reads from the S. enterica mock
+taxon.
+
+Let's check the abundance of these first four taxa across all Individuals.
 ```{r}
-contaminants <- c("Shigella_flexneri", "Escherichia_unclassified",
-    "Escherichia_coli")
+st0 %>%
+    filter(Taxon %in% tb$Taxon[1:4]) %>%
+    group_by(Individual, Taxon) %>%
+    summarize_at(vars(Abundance), mean) %>%
+    spread(Taxon, Abundance)
 ```
-This may lump native reads from some native Escherichia into the contaminants,
-but that isn't important for our analysis.
+
+We will treat `Shigella_flexneri` as our measure of the abundance of the lab
+contaminant.
+```{r}
+contaminant <- "Shigella_flexneri"
+```
+
+Since the `Escherichia_*` and `Salmonella_unclassified` are rare across all
+samples, we will ignore them; but let's filter them out . 
+
+It seems likely that `Salmonella_unclassified` is largely coming from S.
+enterica, but we don't know for sure in the fecal samples. Since it's generally
+rare, we can simply filter it out without affecting our conclusions.
+
+```{r}
+st0 <- st0 %>%
+    filter(!(Taxon %in% c("Salmonella_unclassified", "Escherichia_coli",
+                "Escherichia_unclassified"))) %>%
+    mutate_by(Sample, Abundance = close_elts(Abundance))
+```
 
 ## Taxa by source (Mock, Contaminant, Native)
 
@@ -259,7 +295,7 @@ Classify the taxa by source type:
 st0 <- st0 %>%
     mutate(Source = case_when(
             Taxon %in% mock$Taxon ~ "Mock", 
-            Taxon %in% contaminants ~ "Contaminant",
+            Taxon == contaminant ~ "Contaminant",
             TRUE ~ "Native"
             )
         )
@@ -274,9 +310,8 @@ tb.source %>%
     spread(Source, Abundance) %>%
     print(n=Inf)
 ```
-Labeled contaminants are always a small fraction of the total sample. 
-They also appear in a consistent ratio with the mock for a given protocol
-except in samples Q2 and Q3,
+The contaminant is always a fairly small fraction of the total sample. It also
+generally appears in a consistent ratio with the mock for a given protocol:
 ```{r, fig.width = 4.5, fig.height = 3.5}
 tb.source %>%
     spread(Source, Abundance) %>%
@@ -287,10 +322,10 @@ tb.source %>%
     coord_flip()
 ```
 
-And in these samples, the spike-in (including contaminants) makes up an
-unusually low fraction of the total (see table above), so it is perhaps not
-surprising for the ratio to be different. These facts suggest that the
-`contaminants` are largely being correctly identified.
+In samples Q2 and Q3, the spike-in makes up an unusually low fraction of the
+total (see table above), so the larger ratio in these samples may be due to
+chance. These observations suggest that the contaminant is largely being
+correctly identified.
 
 Composition by source type:
 ```{r}
@@ -323,23 +358,6 @@ nat <- st0 %>%
     summarize(Abundance = sum(Abundance)) %>%
     ungroup
 ```
-
-```{r, eval = FALSE, include = FALSE}
-ggplot(nat, aes(x = Individual, y = Abundance, fill = Family)) +
-    geom_bar(stat = "identity") +
-    scale_y_continuous(limits=c(0,1), breaks = c(0, 0.5, 1), 
-        labels = c("0", "0.5", "1")) +
-    geom_rangeframe(data = tibble(y = c(0, 1), Protocol = "H"), 
-        aes(y = y), sides = "l", inherit.aes = FALSE) +
-    facet_grid(. ~ Protocol) +
-    labs(x = "Specimen",
-        title = paste0("Composition of native bacterial taxa")
-        ) +
-    base_theme +
-    theme(legend.position = "right") +
-    labs(y = "Proportion")
-```
-
 Let's restrict to Families within a minimal abundance to simplify the figure.
 First, lets check the prevalence of various families,
 ```{r}
@@ -366,7 +384,7 @@ nat0 <- nat %>%
     arrange(Phylum, Family)
 ```
 
-Create a color scale for the families that also uses hue to distinguish Phyla.
+Create a color scale for Family that distinguishes Phylum by hue.
 ```{r}
 # Color tibble
 ctb <- nat0 %>%
@@ -472,38 +490,17 @@ p.comp
 Next, we want to visualize relative abundances vs. actual composition (bias) of
 the mock. It is useful to plot the abundance of individual taxa as their ratio
 to the geometric mean of all taxa in the sample. However, this requires that
-all taxa have a positive measured abundance, and there are a few cases where
-the rarest mock taxon Blautia hansenii is not detected:
+all taxa have a positive measured abundance, so let's check that there are no
+zeros for the mock taxa:
 ```{r}
 st0 %>%
     filter(Taxon %in% mock$Taxon, Abundance == 0)
 ```
-In fact, several reads were assigned to Blautia hansenii in each of these
-samples, but not enough to pass Metaphlan2's minimum abundance filter
-(Metaphlan's `clade_profiles` output, not shown).  A common way to remove zeros
-is add a pseudocount of 1 to all read counts. But Metaphlan provides estimated
-proportions rather than read counts, and as noted the detection threshold for
-Metaphlan to decide a taxon is present is greater than 1 read anyways.
-Instead, we estimate the minimum abundance threshold for each sample from the
-proportion of the rarest detected taxon, and then use this as our pseudocount
-to add to all taxa of the sample.
-```{r}
-sample_min <- st0 %>%
-    group_by(Sample) %>%
-    filter(Abundance > 0) %>%
-    summarize(Min = min(Abundance))
-sample_min$Min
-```
-We will further restrict to just the mock taxa,
+From now on, we will restrict to just the mock taxa,
 ```{r}
 stm <- st0 %>%
     filter(Taxon %in% mock$Taxon) %>%
-    left_join(sample_min, by = "Sample") %>%
-    mutate_by(Sample, Abundance = close_elts(Abundance + Min)) %>%
-    select(-Min)
-stm %>%
-    filter(Taxon == "Blautia_hansenii") %>%
-    arrange(Abundance)
+    mutate_by(Sample, Abundance = close_elts(Abundance))
 ```
 Add the actual abundances, (Taking the FACS measurement to give the actual
 relative abundances), and rename Abundance to Observed.
@@ -717,7 +714,7 @@ TODO: consider adding phylum and/or gram type
 Choose Individuals (specimens) to use for estimating bias.
 ```{r}
 set.seed(20190201)
-individuals <- sam$Individual %>% unique
+individuals <- as.character(1:8)
 estimation_set <- base::sample(individuals, 3, replace = FALSE)
 stm0 <- stm %>%
     mutate(Set = ifelse(Individual %in% estimation_set, "Est", "Eval"))
@@ -815,7 +812,7 @@ tb <- as_tibble(pcx$x[,c(1,2)], rownames='Sample_Type') %>%
     separate(Sample_Type, c("Sample", "Type"), sep = ":") %>%
     left_join(sam, by = "Sample")
 tb <- tb %>%
-    mutate(PC1 = -PC1, PC2 = PC2)
+    mutate(PC1 = PC1, PC2 = PC2)
 ```
 Nearly 90% of the variance is covered by the first two PCs, with about 3.4x as
 much variation on PC1 than PC2:
@@ -867,16 +864,16 @@ p.pca <- ggplot(tb0, aes(PC1, PC2, color = Protocol, shape = Set)) +
 labtb <- tribble(
     ~x,     ~y,   ~Protocol,
     -4,    1.5,   "H",
-    0,     2,     "Q",
-    -1.3,  -0.5,  "W",
-    2.3,     0.9,   "Actual"
+    -0.5,  1.3,   "Q",
+    -1.85, -0.4,  "W",
+    2.6,    1.0,   "Actual"
     ) %>%
     mutate(Type = factor("Observed", type.lvls))
 p.pca <- p.pca +
     geom_text(data = labtb,
         aes(x, y, label = Protocol, color = Protocol), 
-        size = 3, inherit.aes = FALSE, show_guide = FALSE)
-# p.pca
+        size = 3, inherit.aes = FALSE, show.legend = FALSE)
+p.pca
 ```
 
 ## Relative abundances before and after calibration
