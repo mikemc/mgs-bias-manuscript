@@ -1,11 +1,11 @@
 # Setup -----------------------------------------------------------------------
 
 library(tidyverse)
+library(here)
+dotenv::load_dot_env(here("data-raw", ".env"))
 
-# Location for downloading files and storing intermediate files. Create a
-# symlink if want to store large data (the sequence reads) in a different
-# location)
-dl_path <- file.path(here::here(), "data-raw", "costea2017-intermediate")
+# Location for downloading reads and other intermediate files
+dl_path <- file.path(Sys.getenv("DATA_PATH"), "costea2017")
 if (!dir.exists(dl_path)) {
     dir.create(dl_path)
 }
@@ -40,7 +40,8 @@ sam <- sam %>%
             TRUE ~ Individual
         )
     )
-# We will use simpler sample names, keeping the original as SI_sample
+# Let's create short informative sample names, while keeping the original as
+# `SI_sample`
 sam <- sam %>%
     mutate(
         SI_sample = Sample,
@@ -52,10 +53,11 @@ print(sam, n = Inf)
 # https://www.ebi.ac.uk/ena/data/view/PRJEB14847
 fn <- file.path(dl_path, "PRJEB14847.tsv")
 download.file("https://www.ebi.ac.uk/ena/data/warehouse/filereport?accession=PRJEB14847&result=read_run&download=txt", fn)
-seqtb <- readr::read_tsv(fn)
+seqtb <- read_tsv(fn)
 
 ## Link to ENA run accessions to connect samples to their sequence data
-# The `SI_sample` in `sam` can be matched to the `library_name` in `seqtb`:
+# The `SI_sample` in `sam`, with a "_DA" tacked on, can be matched to the
+# `library_name` in `seqtb`:
 all(paste0(sam$SI_sample, "_DA") %in% seqtb$library_name)
 sam <- sam %>%
     mutate(library_name = paste0(SI_sample, "_DA"))
@@ -93,7 +95,6 @@ if (!dir.exists(reads_path)) {
 }
 # Paths to the aspera connect `ascp` program and the private key file to be
 # used with the -i option
-dotenv::load_dot_env(file.path(here::here(), "data-raw", ".env"))
 Sys.getenv("ASPERA_ASCP")
 Sys.getenv("ASPERA_KEY")
 
@@ -113,9 +114,7 @@ walk(commands, system)
 
 # ## Alternately, download with wget:
 # ftp_urls <- tb$fastq_ftp %>% str_split(";", simplify=TRUE) %>% c
-# dir.create(file.path(data_path, "reads"), recursive = TRUE)
-# commands <- paste("wget", "-P", file.path(data_path, "reads"), 
-#     paste0("ftp://", ftp_urls)
+# commands <- paste("wget", "-P", reads_path, paste0("ftp://", ftp_urls)
 # walk(commands, system)
 
 ## Check dowloaded files against md5sums

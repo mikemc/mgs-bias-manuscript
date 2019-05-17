@@ -1,6 +1,12 @@
 library(tidyverse)
 library(here)
 
+dotenv::load_dot_env(here("data-raw", ".env"))
+dl_path <- file.path(Sys.getenv("DATA_PATH"), "brooks2015")
+if (!dir.exists(dl_path)) {
+    dir.create(dl_path)
+}
+
 # Download needed files from the supplement of Brooks2015, available at
 # https://bmcmicrobiol.biomedcentral.com/articles/10.1186/s12866-015-0351-6
 #
@@ -19,16 +25,13 @@ library(here)
 # product."
 # https://static-content.springer.com/esm/art%3A10.1186%2Fs12866-015-0351-6/MediaObjects/12866_2015_351_MOESM11_ESM.csv
 
-temp_path <- tempdir(check = TRUE)
 file_numbers <- c(2, 10, 11)
 urls <- paste0("https://static-content.springer.com/esm/",
     "art%3A10.1186%2Fs12866-015-0351-6/MediaObjects/",
     "12866_2015_351_MOESM", file_numbers, "_ESM.csv")
-file_names <- file.path(temp_path,
+file_names <- file.path(dl_path,
     paste0("AdditionalFile", file_numbers, ".csv"))
 walk2(urls, file_names, download.file)
-
-##################
 
 # Read the downloaded csv files. The counts files yield an empty column of all
 # NAs due to trailing commas on each line, which we remove.
@@ -132,7 +135,6 @@ brooks2015_counts
 brooks2015_sample_data 
 usethis::use_data(brooks2015_counts, brooks2015_sample_data)
 
-
 # The above tibbles are what is used in our analysis, with the actual
 # composition extracted from the sample data "Species_list". For those who want
 # the observed and actual abundances in "OTU table" format for their own
@@ -163,7 +165,6 @@ usethis::use_data(brooks2015_counts, brooks2015_sample_data)
 # species names. Here we simply download these files, to be used later in in
 # the Rmd document `analysis/brooks2015_species_info.Rmd`
 
-dotenv::load_dot_env(here("data-raw", ".env"))
 data_path <- Sys.getenv("DATA_PATH")
 
 # GTDB
