@@ -65,10 +65,10 @@ update_geom_defaults("hline", list(color = "grey"))
 ```
 
 ```{r}
-costea.shape_scale <- scale_shape_manual(
-    breaks = c("I", "M"), 
-    values = c(16, 1),
-    labels = c("Fecal", "Mock only"))
+# costea.shape_scale <- scale_shape_manual(
+#     breaks = c("I", "M"), 
+#     values = c(16, 1),
+#     labels = c("Fecal", "Mock only"))
 
 # colors.protocol <- scales::hue_pal()(3)
 # colors.protocol <- c("H" = "#F8766D", "Q" = "#00BA38", "W" = "#619CFF")
@@ -83,6 +83,10 @@ colors.protocol <- c(
     W = "#d95f02", 
     Q = "#7570b3", 
     Actual = "black")
+
+# Labeller for facets when faceting by protocol
+labeller.protocol <- labeller(
+    Protocol = function(p) paste("Protocol", p))
 ```
 
 # Data setup
@@ -223,17 +227,6 @@ st0 <- st %>%
 
 # Composition of the samples
 
-## What fraction of each sample is `Genus_unclassified`?
-
-```{r}
-st0 %>%
-    filter(str_detect(Species, "unclassified")) %>%
-    group_by(Protocol, Individual) %>%
-    summarize_at(vars(Abundance), sum) %>%
-    spread(Protocol, Abundance)
-```
-
-
 ## Identifying contaminants
 
 What is in the mock-only samples that shouldn't be?
@@ -335,12 +328,12 @@ p.source <- ggplot(tb.source,
         # x = factor(Individual, lvls.mock_prop), 
         fill = Source)) +
     geom_bar(stat = "identity") +
-    scale_y_continuous(limits=c(0,1), breaks = c(0, 0.5, 1), 
+    scale_y_continuous(breaks = c(0, 0.5, 1), 
         labels = c("0", "0.5", "1")) +
     geom_rangeframe(data = tibble(y = c(0, 1), Protocol = "H"), 
         aes(y = y), sides = "l", inherit.aes = FALSE) +
     scale_fill_brewer(type = "qual") +
-    facet_grid(. ~ Protocol) +
+    facet_grid(. ~ Protocol, labeller = labeller.protocol) +
     labs(x = "Specimen", fill = "Taxon type", 
         title = "Composition of different bacterial types") +
     base_theme +
@@ -358,6 +351,7 @@ nat <- st0 %>%
     summarize(Abundance = sum(Abundance)) %>%
     ungroup
 ```
+
 Let's restrict to Families within a minimal abundance to simplify the figure.
 First, lets check the prevalence of various families,
 ```{r}
@@ -423,28 +417,6 @@ names(colors.families) <- ctb$Families
 # RColorBrewer::brewer.pal(5, name = "Blues")
 ```
 
-```{r, eval = FALSE, include = FALSE}
-# Composition with new colors:
-p.nat_comp <- ggplot(nat0,
-    aes(x = factor(Individual, as.character(c(1:8, "M"))),
-        y = Abundance, 
-        fill = factor(Family, names(colors.families)))) +
-    geom_bar(stat = "identity") +
-    scale_y_continuous(limits=c(0,1), breaks = c(0, 0.5, 1), 
-        labels = c("0", "0.5", "1")) +
-    geom_rangeframe(data = tibble(y = c(0, 1), Protocol = "H"), 
-        aes(y = y), sides = "l", inherit.aes = FALSE) +
-    scale_fill_manual(values = colors.families) +
-    facet_grid(. ~ Protocol) +
-    labs(x = "Specimen",
-        title = paste0("Composition of native bacterial taxa")
-        ) +
-    base_theme +
-    theme(legend.position = "right") +
-    labs(fill = "Family", y = "Proportion")
-p.nat_comp
-```
-
 We also want the mock and contaminant fractions in the final figure
 ```{r}
 comp <- bind_rows(
@@ -475,9 +447,9 @@ p.comp <- ggplot(comp,
     geom_rangeframe(data = tibble(y = c(0, 1), Protocol = "H"), 
         aes(y = y), sides = "l", inherit.aes = FALSE) +
     scale_fill_manual(values = colors.comp) +
-    facet_grid(. ~ Protocol) +
+    facet_grid(. ~ Protocol, labeller = labeller.protocol) +
     labs(x = "Specimen", y = "Proportion",
-        title = paste0("Composition of bacterial taxa")
+        title = paste0("Composition of all bacterial taxa")
         ) +
     base_theme +
     theme(legend.position = "right", legend.key.size = unit(0.15, "in")) +
@@ -488,82 +460,90 @@ p.comp
 # Relative abundances and bias in the mock spike-in
 
 Next, we want to visualize relative abundances vs. actual composition (bias) of
-the mock. It is useful to plot the abundance of individual taxa as their ratio
-to the geometric mean of all taxa in the sample. However, this requires that
-all taxa have a positive measured abundance, so let's check that there are no
-zeros for the mock taxa:
+the mock spike-in (including the contaminant). Let's first confirm that all
+taxa were detected in all samples:
 ```{r}
 st0 %>%
-    filter(Taxon %in% mock$Taxon, Abundance == 0)
+    filter(Taxon %in% c(mock$Taxon, contaminant)) %>%
+    {all(.$Abundance > 0)}
 ```
-From now on, we will restrict to just the mock taxa,
+Now let's restrict to just the spike-in taxa. Since the 10 mock species appear
+in all samples with the same known relative abundances, it is convenient to
+normalize the abundances of all taxa to the geometric mean of the 10 mock
+species (called `Denom` below).
 ```{r}
-stm <- st0 %>%
+sts <- st0 %>%
+    filter(Taxon %in% c(mock$Taxon, contaminant)) %>%
+    rename(Observed = Abundance) %>%
+    mutate(Taxon = ifelse(Taxon == contaminant, "Contaminant", Taxon))
+denom <- sts %>%
     filter(Taxon %in% mock$Taxon) %>%
-    mutate_by(Sample, Abundance = close_elts(Abundance))
+    group_by(Sample) %>%
+    summarize(Denom = gm_mean(Observed))
+sts <- sts %>%
+    left_join(denom, by = c("Sample")) %>%
+    mutate(Observed = Observed / Denom)
 ```
-Add the actual abundances, (Taking the FACS measurement to give the actual
-relative abundances), and rename Abundance to Observed.
+Next, add the actual relative abundances as determined by the FACS measurement.
 ```{r}
-stm <- stm %>%
-    left_join(mock, by = "Taxon") %>%
-    mutate_by(Sample, Actual = close_elts(FACS)) %>%
-    rename(Observed = Abundance)
+mock0 <- mock %>%
+    rename(Actual = FACS) %>%
+    mutate(Actual = center_elts(Actual))
+sts <- sts %>%
+    left_join(mock0, by = "Taxon") %>%
+    mutate(Error = Observed / Actual)
+```
+Also grab a version with just the mock taxa 
+```{r}
+stm <- sts %>%
+    filter(Taxon %in% mock$Taxon)
 ```
 
-From now on, we will work with the geometrically centered relative abundances.
-```{r}
-stm <- stm %>%
-    mutate_by(Sample, 
-        Actual = center_elts(Actual),
-        Observed = center_elts(Observed)
-    )
-```
 
 Plot the observed and actual relative abundances.
 ```{r, fig.width = 5, fig.asp = 3/4}
-p.step <- ggplot(stm,
-    aes(x = factor(Taxon, mock$Taxon), y = Observed,
+p.step <- ggplot(sts,
+    aes(x = factor(Taxon, c(mock$Taxon, "Contaminant")), y = Observed,
         color = Protocol, shape = (Individual == "M"))) + 
     geom_quasirandom() +
     geom_rangeframe(color = "black", sides = "l") +
-    scale_color_manual(values = colors.protocol) + 
-    # scale_y_log10(breaks = c(0.003, 1e-2, 1e-1, 1, 10, 30),
-    #     labels = c("3e-3", "1e-2", "0.1", "1", "10", "30")) +
     scale_y_log10(labels = log_formatter) +
     scale_x_discrete(labels = tax_labeller) + 
-    costea.shape_scale + 
+    scale_shape_manual(values = c(16, 1), labels = c("Fecal", "Mock only")) +
     scale_color_manual(values = colors.protocol) + 
     coord_cartesian(clip = "off") +
-    labs(title = "Relative abundances of mock taxa",
+    labs(title = "Composition of spike-in taxa",
         y = "Abundance relative to geometric mean",
-    shape = "Specimen type") +
+        shape = "Sample type") +
     base_theme + 
     tax_theme + 
     theme(legend.position = "right")
 # Add the actual abundances (as a stair plot like in Costea2017's Figure 6)
 # underneath the data points
-tb.step <- stm %>%
-    filter(Sample == "H1") %>%
-    select(Taxon, Actual) %>%
+tb.step <- mock0 %>%
     mutate(x1 = rank(desc(Actual)) - 0.5, x2 = x1 + 0.5,
         x3 = ifelse(x2 == 10, 10.5, NA)) %>%
     gather("loc", "x", x1, x2, x3) %>%
     filter(!is.na(x)) %>%
     arrange(x)
 p.step$layers <- c(
-    geom_step(data = tb.step, aes(x = x, y = Actual), 
+    geom_step(data = tb.step, aes(x = x, y = Actual, linetype = "Actual"), 
         size = 0.3, color = "black", inherit.aes = FALSE),
     p.step$layers)
+# p.step <- p.step +
+#     annotate("text", x = 10.6, y = 0.021, label = "Actual",
+#         color = "black", hjust = 0)
 p.step <- p.step +
-    annotate("text", x = 10.6, y = 0.025, label = "Actual",
-        color = "black", hjust = 0)
+    guides(
+        color = guide_legend(order = 1),
+        shape = guide_legend(order = 2),
+        linetype = guide_legend(order = 3))
 p.step
 ```
 
-## Main text figure
+## Main text Figure 3
 
-```{r, fig.width = 7, fig.height = 3.5}
+```{r, fig.width = 7, fig.height = 3.0}
 plot_grid(p.comp, p.step, labels = c("A", "B"))
 ```
 
@@ -571,51 +551,52 @@ plot_grid(p.comp, p.step, labels = c("A", "B"))
 # ggsave(here("figures", "costea2017_2panel.svg"),
 #     width = 7, height = 3.5, units = "in", scale = 4/3)
 ggsave(here("figures", "costea2017_2panel.png"),
-    width = 7, height = 3.5, units = "in", dpi = 300, scale = 4/3)
+    width = 7, height = 3.0, units = "in", dpi = 300, scale = 4/3)
 ggsave(here("figures", "costea2017_2panel.pdf"),
-    width = 7, height = 3.5, units = "in", scale = 4/3, useDingbats = FALSE)
+    width = 7, height = 3.0, units = "in", scale = 4/3, useDingbats = FALSE)
 ```
+
 
 # Estimate bias
 
-Estimate the bias separately within each protocol using the "center" method of
-the `estimate_bias` function,
+Estimate the bias within each protocol as the _center_ (or compositional mean)
+of the observed composition errors. Because all samples have all taxa, we can
+do this very straightforwardly by taking geometric means:
 ```{r}
 bias <- stm %>%
-    group_by(Protocol) %>%
-    nest %>%
-    mutate(Bias = map(data, estimate_bias, method = "center")) %>%
-    unnest(Bias) %>%
-    rename(Bias = Bias_est)
+    group_by(Protocol, Taxon) %>%
+    summarize(Bias = gm_mean(Error)) %>%
+    mutate(Bias = center_elts(Bias)) %>%
+    ungroup
 bias %>%
     spread(Protocol, Bias)
 ```
-The estimated bias vectors are geometrically centered by dividing by the
-geometric mean of taxa,
+The call to `center_elts` normalizes the efficiencies within each protocol to
+have a geometric mean of 1,
 ```{r}
 bias %>%
     group_by(Protocol) %>%
     summarize(gm_mean(Bias))
 ```
-so that the elements (relative efficiencies) can be interpreted as the
-detection efficiency relative to the average taxon for that protocol.
+The elements of the `Bias` column can be interpretted as the detection
+efficiency relative to the average taxon for that protocol.
 
-To confirm that our estimate is good, we can use it to calibrate the relative
-abundances in the previous figure:
+To confirm that the estimation worked, let's calibrate the relative abundances
+from the previous figure:
 ```{r, fig.width = 5, fig.asp = 3/4}
 p.step.cal <- p.step
 p.step.cal$data <- p.step.cal$data %>%
     left_join(bias, by = c("Protocol", "Taxon")) %>%
-    mutate_by(Sample, Observed = center_elts(Observed / Bias))
+    mutate(Observed = Observed / Bias)
 p.step.cal
 ```
 
-Check that the bias predictions predict the taxon ratios:
+Let's also check that the bias predictions predict the taxon ratios:
 ```{r}
 ratios <- crossing(Sample = setdiff(sam$Sample, c("QA", "QB")), 
     Taxon.x = mock$Taxon, Taxon.y = mock$Taxon) %>%
     left_join(stm, by = c("Sample", "Taxon.x" = "Taxon")) %>%
-    left_join(stm %>% select(Sample, Taxon, Observed, Actual), 
+    left_join(stm %>% select(Sample, Taxon, Observed, Actual, Error), 
         by = c("Sample", "Taxon.y" = "Taxon")) %>%
     mutate(Pair = paste(Taxon.x, Taxon.y, sep = ":"))
 ratios <- ratios %>%
@@ -641,7 +622,7 @@ ggplot(ratios, aes(Pair, Error,
         shape = 3, size = 4, color = "black") +
     geom_text(position = position_jitter(width=0.25, height=0)) +
     geom_hline(yintercept = 1) +
-    facet_grid(Protocol ~ .) +
+    facet_grid(Protocol ~ ., labeller = labeller.protocol) +
     geom_rangeframe(sides = "l", color= "black") + 
     scale_color_manual(values = colors.protocol) + 
     scale_y_log10() +
@@ -655,28 +636,188 @@ Distribution of efficiencies for the three protocols:
 ggplot(bias, aes(Bias, fill = Protocol)) +
     geom_dotplot() +
     scale_x_log10() +
-    facet_grid(Protocol ~ .) +
+    facet_grid(Protocol ~ ., labeller = labeller.protocol) +
     scale_fill_manual(values = colors.protocol) +
     scale_y_continuous(breaks = NULL) +
     geom_rangeframe() +
     base_theme
 ```
 
+Let's also estimate the differential bias (including the contaminant):
+```{r}
+dbias <- sts %>%
+    select(Taxon, Observed, Protocol, Individual) %>%
+    spread(Protocol, Observed) %>%
+    group_by(Taxon) %>%
+    summarize(
+        HQ = gm_mean(H / Q),
+        HW = gm_mean(H / W),
+        QW = gm_mean(Q / W))
+dbias <- dbias %>%
+    gather("Protocol", "Bias", -Taxon)
+dbias %>%
+    spread(Protocol, Bias)
+```
+Here, bias is still shown relative to the 10 mock (non-contaminant) species.
+
+
+## Residuals
+
+```{r}
+stm <- stm %>%
+    left_join(bias, by = c("Protocol", "Taxon")) %>%
+    mutate(Residual = Error / Bias)
+# Note, `Residual` is already geometrically centered.
+```
+
+Residuals, with the mock-only marked:
+```{r}
+stm %>%
+    mutate(Taxon = factor(Taxon, mock$Taxon)) %>%
+    ggplot(aes(x = Taxon, y = Residual, shape = Individual == "M",
+            color = Protocol)) +
+    geom_quasirandom() +
+    geom_hline(yintercept = 1) +
+    scale_y_log10() +
+    scale_shape_manual(values = c(16, 1), labels = c("Fecal", "Mock only")) +
+    scale_color_manual(values = colors.protocol) + 
+    facet_grid(Protocol ~ ., scales = "free_y") +
+    base_theme +
+    tax_theme
+    # facet_wrap(~Taxon)
+```
+
+Important to note that the residuals are not independent across taxa when
+viewed as the CLR---the high Residuals for L. plantarum and B. hansenii for
+protocol H are pushing down the others. So really this should be viewed w/
+pairs of taxa.
+
+TODO: do the above as a pairs plot
+
+
+## Partition of compositional error into bias and noise
+
+```{r}
+err <- stm %>%
+    group_by(Protocol, Sample) %>%
+    summarize(
+        Error2 = anorm(Observed / Actual)^2,
+        Bias2 = anorm(Bias)^2,
+        Noise2 = anorm(Observed / (Actual * Bias))^2
+        ) %>%
+    summarize_at(vars(-Sample), mean)
+err0 <- err %>% 
+    mutate(Frac_Bias = Bias2 / Error2, Frac_Noise = Noise2 / Error2)
+err0
+#> # A tibble: 3 x 6
+#>   Protocol Error2 Bias2 Noise2 Frac_Bias Frac_Noise
+#>   <chr>     <dbl> <dbl>  <dbl>     <dbl>      <dbl>
+#> 1 H          39.7  38.8 0.892      0.978    0.0225 
+#> 2 Q          11.3  10.2 1.10       0.903    0.0969 
+#> 3 W          12.2  12.2 0.0492     0.996    0.00402
+err0 %>% 
+    transmute(Protocol, Frac_Bias + Frac_Noise)
+```
+
+TODO: Provide these numbers or a subset (such as `Frac_Bias`) in the Results.
+
+Note that this estimate of the noise is biased downwards; an unbiased estimate
+would divide by S-1 instead of S.
+
+Get the geometric standard deviations for the table:
+```{r}
+err.gmsd <- err %>% 
+    mutate_at(vars(-Protocol), ~ exp(sqrt(. / (length(mock$Taxon) - 1)))) %>% 
+    rename_at(vars(-Protocol), str_extract, "[:alpha:]+")
+err.gmsd
+#> # A tibble: 3 x 4
+#>   Protocol Error  Bias Noise
+#>   <chr>    <dbl> <dbl> <dbl>
+#> 1 H         8.17  7.97  1.37
+#> 2 Q         3.07  2.90  1.42
+#> 3 W         3.21  3.20  1.08
+```
+
+TODO: Make sure to explain what these numbers are in the Methods and Table
+legend.
+
+Interpretation: These numbers describe the "typical" fold-error in the ratio of
+a random pair of taxa.
+
+## Bootstrap standard errors
+
+Get the bias estimates w/ estimated geometric standard errors -
+```{r}
+reps <- stm %>%
+    group_by(Protocol) %>%
+    nest %>%
+    mutate(
+        Error_matrix = map(data, build_matrix, "Sample", "Taxon", "Error"),
+        Bootreps = map(Error_matrix, bootrep_center, R = 4e3, 
+            method = "gm")) %>%
+    unnest(Bootreps) %>%
+    rename(Bias = Center)
+stats <- reps %>%
+    group_by(Protocol, Taxon) %>%
+    summarize(gm_mean = gm_mean(Bias), gm_se = gm_sd(Bias)) %>%
+    ungroup
+bias <- left_join(bias, stats, by = c("Protocol", "Taxon"))
+```
+The geometric means of the resamplings are very close to Bhat, as expected.
+```{r}
+all.equal(bias$Bias, bias$gm_mean)
+bias <- bias %>% select(-gm_mean)
+```
+
+```{r}
+ggplot(bias, aes(factor(Taxon, mock$Taxon), Bias, color = Protocol)) +
+    geom_hline(yintercept = 1) +
+    geom_quasirandom(data = stm, aes(y = Observed / Actual), alpha = 0.5) +
+    geom_pointrange(aes(ymin = Bias / gm_se^2, ymax = Bias * gm_se^2),
+        fatten = 1.5) +
+    scale_y_log10() +
+    scale_color_manual(values = colors.protocol) + 
+    facet_wrap(~ Protocol, labeller = labeller.protocol) +
+    geom_rangeframe(sides = "l", color = "black") +
+    scale_y_log10(labels = log_formatter) +
+    scale_x_discrete(labels = tax_labeller) + 
+    labs(y = "Efficiency / Gm. mean") +
+    base_theme +
+    tax_theme +
+    theme(panel.spacing = unit(1, "lines"))
+```
+
+```{r, include = FALSE, eval = SAVE_FIGURES}
+ggsave(here("figures", "costea2017_bias_estimates.png"),
+    width = 7, height = 3.5, units = "in", dpi = 300, scale = 4/3)
+ggsave(here("figures", "costea2017_bias_estimates.pdf"),
+    width = 7, height = 3.5, units = "in", scale = 4/3, useDingbats = FALSE)
+```
+
+## Table without standard errors
+
 Make a table for the main text using kable and kableExtra:
 ```{r}
 bias_summary <- bias %>%
     group_by(Protocol) %>%
     summarize(
-        `Gm. range` = max(Bias) / min(Bias),
-        `Gm. std. dev.` = exp(sd(log(Bias)))
+        `Gm. range (bias)` = max(Bias) / min(Bias),
+        `Gm. std. dev. (bias)` = exp(sd(log(Bias)))
     ) %>%
     gather("Statistic", "Value", -Protocol) %>%
     spread(Protocol, Value)
 bias_summary
-lvls <- c(mock$Taxon, "Gm. range", "Gm. std. dev.")
+err.gmsd0 <- err.gmsd %>%
+    select(Protocol, Noise) %>%
+    spread(Protocol, Noise) %>%
+    add_column(Statistic = "Gm. std. dev. (noise)", .before = 1)
+err.gmsd0
+lvls <- c(mock$Taxon, "Gm. range (bias)", "Gm. std. dev. (bias)",
+    "Gm. std. dev. (noise)")
 bias_tab <- bind_rows(
-    bias %>% spread(Protocol, Bias),
-    bias_summary %>% rename(Taxon = Statistic)
+    bias %>% select(-gm_se) %>% spread(Protocol, Bias),
+    bias_summary %>% rename(Taxon = Statistic),
+    err.gmsd0 %>% rename(Taxon = Statistic),
     ) %>%
     mutate(Taxon = factor(Taxon, lvls)) %>%
     arrange(Taxon)
@@ -686,7 +827,6 @@ bias_tab
 Table for the main text
 ```{r}
 tex <- bias_tab %>%
-    # mutate(Taxon = str_replace(Taxon, "_", " ")) %>%
     mutate(
         Taxon = kableExtra::cell_spec(
             str_replace(Taxon, "_", " "), 
@@ -702,12 +842,132 @@ tex <- bias_tab %>%
     # kableExtra::kable_styling(latex_options = "striped")
     kableExtra::row_spec(10, extra_latex_after = "\\midrule")
 tex
+# clipr::write_clip(tex)
 ```
-<!--
-TODO: Edit the above to show 2 sig figures instead of 1 decimal place (esp. to
-deal with L plantarum in protocol H).
-TODO: consider adding phylum and/or gram type
--->
+
+## Alternate number formatting
+
+```{r}
+fmt <- "{format(Bias, digits = 1)}"
+bias_tab0 <- bias %>% 
+    transmute(Protocol, Taxon, Bias = glue::glue(fmt)) %>%
+    spread(Protocol, Bias)
+bias_tab0
+```
+
+```{r}
+fmt.tex <- "${format(Bias, digits = 1)}$"
+bias_tab1 <- bias %>% 
+    transmute(Protocol, Taxon, Bias = glue::glue(fmt.tex)) %>%
+    spread(Protocol, Bias)
+bias_tab1
+```
+
+```{r}
+bias_summary <- bias %>%
+    group_by(Protocol) %>%
+    summarize(
+        `Gm. range (bias)` = max(Bias) / min(Bias),
+        `Gm. std. dev. (bias)` = exp(sd(log(Bias)))
+    ) %>%
+    gather("Statistic", "Value", -Protocol) %>%
+    spread(Protocol, Value)
+bias_summary0 <- bind_rows(bias_summary, err.gmsd0) %>% 
+    rename(Taxon = Statistic) %>%
+    mutate_at(vars(H, Q, W), round, 2) %>%
+    mutate_at(vars(H, Q, W), as.character)
+bias_tab2 <- bind_rows(bias_tab1, bias_summary0) %>%
+    mutate(Taxon = factor(Taxon, lvls)) %>%
+    arrange(Taxon)
+```
+
+Table for the main text
+```{r}
+tex <- bias_tab2 %>%
+    mutate(
+        Taxon = kableExtra::cell_spec(
+            str_replace(Taxon, "_", " "), 
+            "latex", 
+            italic = Taxon %in% mock$Taxon)
+        ) %>%
+    knitr::kable(format="latex", booktabs = TRUE, linesep = "",
+        escape = FALSE, align = c("l", "r", "r", "r")) %>%
+    # knitr::kable(digits=1, format="latex", booktabs = TRUE, linesep = "",
+    #     escape = FALSE) %>%
+    # kableExtra::kable_styling(latex_options = "striped")
+    kableExtra::row_spec(10, extra_latex_after = "\\midrule")
+tex
+# clipr::write_clip(tex)
+```
+
+## View how dispersion in bias estimate varies with sample size
+
+Use Protocol H, which has an intermediate level of noise.
+
+```{r}
+mat <- stm %>%
+    filter(Protocol == "H") %>%
+    build_matrix(Sample, Taxon, Error)
+N <- 1:9
+names(N) <- N
+reps.H <- map_dfr(N, ~bootrep_center(mat, R = 4e3, N = ., method = "gm"),
+    .id = "N") %>%
+    rename(Bias = Center)
+reps.H.summary <- reps.H %>%
+    group_by(N, Taxon) %>%
+    summarize(gm_mean = gm_mean(Bias), gm_se = gm_sd(Bias)) %>%
+    mutate(Protocol = "H")
+```
+
+Left panel shows the estimate with dispersion for the case of N = 3, and the
+right panel shows how the dispersion decreases with N (N = # of control
+samples). 
+```{r}
+lvls.color <- reps.H.summary %>%
+    filter(N == 3) %>%
+    arrange(-gm_se) %>%
+    .$Taxon
+pl <- ggplot(reps.H.summary, aes(factor(Taxon, mock$Taxon), gm_mean, 
+        color = factor(Taxon, lvls.color))) +
+    geom_hline(yintercept = 1) +
+    geom_quasirandom(data = stm %>% filter(Protocol == "H"), 
+        aes(y = Observed / Actual), alpha = 0.5) +
+    geom_pointrange(aes(ymin = gm_mean / gm_se, ymax = gm_mean * gm_se),
+        fatten = 1.5) +
+    geom_rangeframe(sides = "l", color = "black") +
+    scale_y_log10(labels = log_formatter) +
+    scale_x_discrete(labels = tax_labeller) + 
+    labs(y = "Efficiency / Gm. mean", 
+        title = "Mean with standard error for 3 controls") +
+    base_theme +
+    tax_theme +
+    theme(panel.spacing = unit(1, "lines"))
+r <- range(reps.H.summary$gm_se) %>% round(2)
+pr <- ggplot(reps.H.summary, aes(N, gm_se, 
+        color = fct_reorder(Taxon, -gm_se))) +
+    # geom_vline(xintercept = "3") +
+    geom_line(aes(group = Taxon)) +
+    geom_point() +
+    scale_y_log10(limits = c(1, 2), breaks = c(1, r[1], r[2], 2)) +
+    base_theme +
+    scale_color_discrete(labels = tax_labeller) + 
+    geom_rangeframe(color = "black") +
+    theme(legend.position = "right") +
+    labs(x = "Number of controls", y = "Geometric standard error", 
+        title = "Standard error vs. number of controls", 
+        color = "Taxon")
+```
+
+```{r, fig.width = 8.5, fig.height = 4}
+plot_grid(pl, pr, rel_widths = c(0.7, 1), labels = c("A", "B"))
+```
+
+```{r, include = FALSE, eval = SAVE_FIGURES}
+ggsave(here("figures", "costea2017_dispersion.png"),
+    width = 8.5, height = 4, units = "in")
+ggsave(here("figures", "costea2017_dispersion.pdf"),
+    width = 8.5, height = 4, units = "in", useDingbats = FALSE)
+```
 
 # Calibration
 
@@ -717,6 +977,7 @@ set.seed(20190201)
 individuals <- as.character(1:8)
 estimation_set <- base::sample(individuals, 3, replace = FALSE)
 stm0 <- stm %>%
+    select(-Bias, -Residual) %>%
     mutate(Set = ifelse(Individual %in% estimation_set, "Est", "Eval"))
 sam <- sam %>%
     mutate(Set = ifelse(Individual %in% estimation_set, "Est", "Eval"))
@@ -941,3 +1202,4 @@ ggsave(here("figures", "costea2017_calibration.pdf"),
 ```{r}
 sessionInfo()
 ```
+
