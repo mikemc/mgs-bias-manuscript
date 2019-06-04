@@ -152,29 +152,49 @@ log_center_rss <- function(mat, weights = rep(1, nrow(mat)), bound = 10) {
     clr_center
 }
 
-
 # Boostrapping ----------------------------------------------------------------
 
 # TODO: 
 # - consider what the input should be : a df with sample, observed, and actual,
 # or a matrix or wide data frame of compositional errors
-# - Give ability to specify in and out scale
 # - add tests
 # - add documentation
+# - Test handling of log scale
 
-bootrep_center <- function(.data, R = 4000, method = "proj",
+# N - the number of samples to choose in each replicate of the Frequentist
+# bootstrap
+bootrep_center <- function(.data, R = 4000, N = nrow(.data), method = "proj",
     type = "frequentist", in_scale = "linear", out_scale = "linear") {
 
+    if (!(in_scale %in% c("linear", "log")))
+        stop('`in_scale` must be "linear" or "log"')
+    if (!(out_scale %in% c("linear", "log")))
+        stop('`out_scale` must be "linear" or "log"')
+    if (!(method %in% c("proj", "gm", "rss")))
+        stop('`method` must be "proj", "gm", or "rss"')
+    if (!(type %in% c("frequentist", "bayesian")))
+        stop('`type` must be "frequentist" or "bayesian"')
+
+    if (N < nrow(.data) & type == "bayesian")
+        stop('`N < nrow(.data)` only supported with type = "frequentist"')
+
+    N0 <- nrow(.data)
+
     mat <- .data %>% as("matrix")
-    N <- nrow(mat)
+    if (in_scale == "linear")
+        mat <- log(mat)
 
     # version of `center()` that takes the weight vector first
-    center_w <- function (w, .data, ...) center(.data, w, ...)
+    center_boot <- function (wt, .data, method) {
+        center(.data, wt, 
+            in_scale = "log", out_scale = "log", 
+            method = method, enframe = TRUE)
+    }
 
     # List of weights for each replicate
     if (type == "frequentist") {
-        # Weights ~ Multinomial(N, rep(1, N) / N)
-        wmat <- rmultinom(R, N, rep(1, N))
+        # Weights ~ Multinomial(N, rep(1, N0) / N0)
+        wmat <- rmultinom(R, N, rep(1, N0))
         wlist <- lapply(seq(R), function(i) wmat[,i])
     } else if (type == "bayesian") {
         # Weights ~ Dirichlet(rep(1, N))
@@ -182,8 +202,12 @@ bootrep_center <- function(.data, R = 4000, method = "proj",
             map(rexp, rate = 1)
     }
     names(wlist) <- seq_along(wlist)
-    reps <- map_dfr(wlist, center_w, .data = mat, method = method, 
-            enframe = TRUE, .id = ".id")
+    reps <- map_dfr(wlist, center_boot, .data = mat, method = method, 
+        .id = ".id")
+
+    if (out_scale == "linear")
+        reps <- mutate(reps, Center = exp(Center))
+        
     reps
 }
 
