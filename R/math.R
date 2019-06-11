@@ -43,6 +43,20 @@ gm_range <- function(x) {
     max(x) / min(x)
 }
 
+#' Geometric absolute value of x
+#'
+#' @export
+gm_abs <- function(x) {
+    exp(abs(log(x)))
+}
+
+#' Geometric (multiplicative) version of the function f
+#'
+#' @export
+gm <- function(f) {
+    function (x, ...) exp(f(log(x), ...))
+}
+
 #' Shannon entropy of x
 #'
 #' @export
@@ -132,6 +146,51 @@ anorm <- function (x, na_rm = FALSE) {
 #'
 #' @export
 pw_ratios <- function (x) {
-    tidyr::crossing(i = seq(x), j = seq(x)) %>%
-        {purrr::map2_dbl(.$i, .$j, ~ x[.x] / x[.y])}
+    if (is.null(names(x))) 
+        names(x) <- seq(x)
+    tb <- tidyr::crossing(i = names(x), j = names(x)) %>%
+        mutate(Name = paste(i, j, sep = ":"))
+    v <- purrr::map2_dbl(tb$i, tb$j, ~ x[.x] / x[.y])
+    names(v) <- tb$Name
+    v
 }
+
+# Turn a matrix of compositional data into a tidy data frame of ratio
+# observations
+
+#' Pairwise ratios of taxa from matrix of multiple samples
+#'
+#' @export
+pw_ratios_matrix <- function (x, na_rm = FALSE) {
+    if (is.null(colnames(x))) 
+        colnames(x) <- seq(x)
+    tb <- tidyr::crossing(i = colnames(x), j = colnames(x)) %>%
+        mutate(Name = paste(i, j, sep = ":"))
+    v <- purrr::map2(tb$i, tb$j, ~ x[,.x] / x[,.y])
+    names(v) <- tb$Name
+    # v
+    # tidy df
+    tb <- map(v, enframe, "Sample", "Ratio") %>%
+        bind_rows(.id = "Pair")
+    if (na_rm) {
+        tb <- filter(tb, !is.na(Ratio))
+    }
+    tb
+}
+
+
+#' Ratio matrix
+#'
+#' @export
+ratio_matrix <- function (x, diag = TRUE, upper = TRUE) {
+    K <- length(x)
+    mat <- matrix(x, nrow = K, ncol = K) / 
+        matrix(x, nrow = K, ncol = K, byrow = TRUE)
+    rownames(mat) <- colnames(mat) <- names(x)
+    if (!diag) 
+        diag(mat) <- NA
+    if (!upper) 
+        upper.tri(mat) <- NA
+    mat
+}
+

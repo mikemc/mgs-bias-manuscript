@@ -1,16 +1,7 @@
-#' Get the upper left corner of a 2-d array.
-#'
+#' @name corner
+#' @importFrom useful corner
 #' @export
-corner <- function (x, r = 5L, c = 5L) {
-    if (r > nrow(x)) {
-        r <- nrow(x)
-    }
-    if (c > ncol(x)) {
-        c <- nrow(x)
-    }
-    x[seq(r), seq(c)]
-}
-
+useful::corner
 
 # Helpers for working with "tidy" microbiome data -----------------------------
 
@@ -49,4 +40,58 @@ build_matrix <- function(.data, rows, cols, elts, fill = NULL) {
     mat <- tb %>% select(-!!rows) %>% as("matrix")
     rownames(mat) <- tb %>% pull(!!rows)
     mat
+}
+
+#' Coerce a (wide) tibble to a matrix
+#'
+#' @export
+as_matrix <- function(tb, rownames = NULL) {
+    rownames <- rlang::enquo(rownames)
+    if (rlang::quo_is_null(rownames)) {
+        mat <- tb %>% as("matrix")
+    } else {
+        mat <- tb %>% select(-!!rownames) %>% as("matrix")
+        rownames(mat) <- tb %>% pull(!!rownames)
+    }
+    mat
+}
+
+
+# TODO: ensure that comp_vars default won't pick group_vars; add ability to use
+# symbols as arguments; Add ability to specify the taxon_var
+
+#' Compute taxon ratios from a tidy data frame
+#'
+#' Assumes the taxon variable name is `Taxon`
+#'
+#' @param drop Whether to drop the individual taxon quantities
+#' @export
+compute_ratios <- function(.data, 
+    # taxon_var = "Taxon",
+    group_vars = c("Sample"),
+    comp_vars = setdiff(names(select_if(.data, is.numeric)), group_vars),
+    drop = TRUE) {
+
+    .data <- .data %>%
+        select(Taxon, group_vars, comp_vars)
+
+    # Get all pairs of taxa and join the abundances.
+    tb <- expand(.data, nesting(!!!syms(group_vars)), 
+        Taxon.x = Taxon, Taxon.y = Taxon) %>%
+        # mutate(Pair = paste(Taxon.x, Taxon.y, sep = ":")) %>%
+        left_join(.data, by = c(group_vars, "Taxon.x" = "Taxon")) %>%
+        left_join(.data, by = c(group_vars, "Taxon.y" = "Taxon"))
+    # Each var in `comp_vars` now appears twice, with a ".x" and a ".y" suffix. 
+
+    # Compute the ratios for each var in `comp_vars`:
+    for (v in comp_vars) {
+        tb[v] <- tb[paste0(v, ".x")] / tb[paste0(v, ".y")]
+    }
+
+    if (drop == TRUE) {
+        tb <- tb %>%
+            select(Taxon.x, Taxon.y, group_vars, comp_vars)
+    }
+
+    tb
 }
