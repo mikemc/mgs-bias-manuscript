@@ -73,4 +73,7 @@ Afterwards, merge all accessions into a single table by running
 #### 3-costea2017-import-metaphlan2-profiles.R
 
 Import the Metaphlan2 profiles with custom settings into the R package so that
-it can be accessed through `data()`.
+it can be accessed through `data()`. Also, download a phylogeny for Metaphlan2
+species from the
+[curatedMetagenomicData](https://github.com/waldronlab/curatedMetagenomicData)
+Bioconductor package.
