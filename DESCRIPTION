@@ -24,6 +24,7 @@ Suggests:
     devtools,
     dotenv,
     here,
+    ggstance,
     ggthemes,
     ggbeeswarm,
     knitr,

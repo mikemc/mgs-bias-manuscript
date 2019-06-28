@@ -51,7 +51,7 @@ as_matrix <- function(tb, rownames = NULL) {
         mat <- tb %>% as("matrix")
     } else {
         mat <- tb %>% select(-!!rownames) %>% as("matrix")
-        rownames(mat) <- tb %>% pull(!!rownames)
+        rownames(mat) <- tb %>% dplyr::pull(!!rownames)
     }
     mat
 }
@@ -69,18 +69,19 @@ as_matrix <- function(tb, rownames = NULL) {
 compute_ratios <- function(.data, 
     # taxon_var = "Taxon",
     group_vars = c("Sample"),
-    comp_vars = setdiff(names(select_if(.data, is.numeric)), group_vars),
+    comp_vars = setdiff(names(dplyr::select_if(.data, is.numeric)), 
+        group_vars),
     drop = TRUE) {
 
     .data <- .data %>%
-        select(Taxon, group_vars, comp_vars)
+        dplyr::select(Taxon, group_vars, comp_vars)
 
     # Get all pairs of taxa and join the abundances.
-    tb <- expand(.data, nesting(!!!syms(group_vars)), 
+    tb <- tidyr::expand(.data, tidyr::nesting(!!!syms(group_vars)), 
         Taxon.x = Taxon, Taxon.y = Taxon) %>%
         # mutate(Pair = paste(Taxon.x, Taxon.y, sep = ":")) %>%
-        left_join(.data, by = c(group_vars, "Taxon.x" = "Taxon")) %>%
-        left_join(.data, by = c(group_vars, "Taxon.y" = "Taxon"))
+        dplyr::left_join(.data, by = c(group_vars, "Taxon.x" = "Taxon")) %>%
+        dplyr::left_join(.data, by = c(group_vars, "Taxon.y" = "Taxon"))
     # Each var in `comp_vars` now appears twice, with a ".x" and a ".y" suffix. 
 
     # Compute the ratios for each var in `comp_vars`:
@@ -90,7 +91,7 @@ compute_ratios <- function(.data,
 
     if (drop == TRUE) {
         tb <- tb %>%
-            select(Taxon.x, Taxon.y, group_vars, comp_vars)
+            dplyr::select(Taxon.x, Taxon.y, group_vars, comp_vars)
     }
 
     tb

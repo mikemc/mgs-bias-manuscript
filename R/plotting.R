@@ -20,13 +20,12 @@ tax_labeller <- function (name) {
         map( function (x) bquote(italic(.(x))) )
 }
 
-
 #' Abbreviate taxon names from "Genus_species" to "Gsp"
 #'
 #' @export
 tax_abbrev <- function (taxa) {
-    str_match(taxa, "([A-Z])[a-z]+_([a-z]{2})") %>%
-        {paste0(.[,2], .[,3])}
+    m <- str_match(taxa, "([A-Z])[a-z]+_([a-z]{2})[a-z]*")
+    ifelse(is.na(m[,1]), taxa, paste0(m[,2], m[,3]))
 }
 
 
@@ -53,13 +52,14 @@ xy_values <- function(ggplot) {
         )
 }
 
+# TODO: import ggplot functions
 
-#'
-#'
 #'
 #'
 #' Inspired by the `boxplot()` method for the `acomp` object of the
 #' `compositions` package.
+#'
+#' @export
 plot_ratios <- function(.data) {
 
     samples <- rownames(.data)
@@ -78,7 +78,7 @@ plot_ratios <- function(.data) {
     p <- ggplot(ratios, aes(x = factor(0), y = Ratio)) +
         geom_hline(yintercept = 1, color = "grey") +
         # geom_boxplot() +
-        geom_quasirandom(groupOnX = TRUE) +
+        ggbeeswarm::geom_quasirandom(groupOnX = TRUE) +
         geom_point(data = ratios.cen, aes(y = Center), shape = 3, size = 3,
             color = "darkred") +
         scale_y_log10() +

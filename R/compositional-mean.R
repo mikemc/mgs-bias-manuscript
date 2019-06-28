@@ -22,13 +22,15 @@
 #' @param method - "proj", "gm", or "rss"
 #' @param in_scale - "linear" (default) or "log"
 #' @param out_scale - "linear" (default) or "log"
+#' @param denom - Taxa to use in the denominator; if NULL, use all taxa.
 #' @param enframe - whether to return the bias estimate as a two-column tibble
 #' @param bound - single number giving the lower and upper bound on the alr
 #'   efficiencies ("rss" only) 
 #'
 #' @export
 center <- function(.data, weights = rep(1, nrow(.data)), method = "proj",
-    in_scale = "linear", out_scale = "linear", enframe = FALSE, bound = 10) {
+    in_scale = "linear", out_scale = "linear", denom = NULL, enframe = FALSE, 
+    bound = 10) {
     if (!(in_scale %in% c("linear", "log")))
         stop('`in_scale` must be "linear" or "log"')
     if (!(out_scale %in% c("linear", "log")))
@@ -53,6 +55,9 @@ center <- function(.data, weights = rep(1, nrow(.data)), method = "proj",
     } else if (method == "rss") {
         b <- log_center_rss(mat, weights, bound = bound)
     }
+
+    if (!is.null(denom))
+        b <- b - mean(b[denom])
 
     if (out_scale == "linear")
         b <- exp(b)
@@ -160,11 +165,21 @@ log_center_rss <- function(mat, weights = rep(1, nrow(mat)), bound = 10) {
 # - add tests
 # - add documentation
 # - Test handling of log scale
+# - Change type arg to be based on the weight distribution, "multinomial" or "dirichlet"
+# dist = "dirichlet" (or maybe distr a better keyword)
 
-# N - the number of samples to choose in each replicate of the Frequentist
-# bootstrap
+# Choice of two weight distributions - Multinomial(N, rep(1/S, S)), as in the
+# classic bootstrap, and Dirichlet(rep(1, S)), as in the Bayesian bootstrap of
+# Rubin.
+
+# N - the choice of N for multinomial samplign.
+
+#' Draw bootstrap replicates of the sample center.
+#'
+#' @export
 bootrep_center <- function(.data, R = 4000, N = nrow(.data), method = "proj",
-    type = "frequentist", in_scale = "linear", out_scale = "linear") {
+    dist = "dirichlet", in_scale = "linear", out_scale = "linear",
+    denom = NULL) {
 
     if (!(in_scale %in% c("linear", "log")))
         stop('`in_scale` must be "linear" or "log"')
@@ -172,11 +187,11 @@ bootrep_center <- function(.data, R = 4000, N = nrow(.data), method = "proj",
         stop('`out_scale` must be "linear" or "log"')
     if (!(method %in% c("proj", "gm", "rss")))
         stop('`method` must be "proj", "gm", or "rss"')
-    if (!(type %in% c("frequentist", "bayesian")))
-        stop('`type` must be "frequentist" or "bayesian"')
+    if (!(dist %in% c("multinomial", "dirichlet")))
+        stop('`dist` must be "multinomial" or "dirichlet"')
 
-    if (N < nrow(.data) & type == "bayesian")
-        stop('`N < nrow(.data)` only supported with type = "frequentist"')
+    if (N < nrow(.data) & dist == "dirichlet")
+        stop('`N < nrow(.data)` only supported with dist = "multinomial"')
 
     N0 <- nrow(.data)
 
@@ -187,16 +202,16 @@ bootrep_center <- function(.data, R = 4000, N = nrow(.data), method = "proj",
     # version of `center()` that takes the weight vector first
     center_boot <- function (wt, .data, method) {
         center(.data, wt, 
-            in_scale = "log", out_scale = "log", 
+            in_scale = "log", out_scale = "log", denom = denom,
             method = method, enframe = TRUE)
     }
 
     # List of weights for each replicate
-    if (type == "frequentist") {
+    if (dist == "multinomial") {
         # Weights ~ Multinomial(N, rep(1, N0) / N0)
         wmat <- rmultinom(R, N, rep(1, N0))
         wlist <- lapply(seq(R), function(i) wmat[,i])
-    } else if (type == "bayesian") {
+    } else if (dist == "dirichlet") {
         # Weights ~ Dirichlet(rep(1, N))
         wlist <- rep(N, R) %>%
             map(rexp, rate = 1)

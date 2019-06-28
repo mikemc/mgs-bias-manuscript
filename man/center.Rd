@@ -5,8 +5,8 @@
 \title{Compute the center (compositional mean) of a set of compositions}
 \usage{
 center(.data, weights = rep(1, nrow(.data)), method = "proj",
-  in_scale = "linear", out_scale = "linear", enframe = FALSE,
-  bound = 10)
+  in_scale = "linear", out_scale = "linear", denom = NULL,
+  enframe = FALSE, bound = 10)
 }
 \arguments{
 \item{.data}{- all-numeric data frame or matrix with taxa as columns}
@@ -18,6 +18,8 @@ center(.data, weights = rep(1, nrow(.data)), method = "proj",
 \item{in_scale}{- "linear" (default) or "log"}
 
 \item{out_scale}{- "linear" (default) or "log"}
+
+\item{denom}{- Taxa to use in the denominator; if NULL, use all taxa.}
 
 \item{enframe}{- whether to return the bias estimate as a two-column tibble}
 
