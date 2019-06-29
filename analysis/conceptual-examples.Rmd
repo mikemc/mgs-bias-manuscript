@@ -102,16 +102,37 @@ tb0 %>%
 ```
 
 We can view the measurement error across the three samples with bar plots, as
-done in main text Figure 2.
+done in main text Figure 2, and also in terms of the ratios to Taxon 1:
 ```{r}
-ggplot(tb, aes(x = Type, y = Proportion, fill = Taxon)) +
+p.props <- ggplot(tb, aes(x = Type, y = Proportion, fill = Taxon)) +
     geom_bar(stat = "identity") +
     scale_fill_manual(values = colors.taxa) +
-    facet_wrap(~Sample, scales = "free")
+    facet_wrap(~Sample) +
+    scale_y_continuous(breaks = c(0, 0.5, 1)) +
+    base_theme +
+    theme(strip.text = element_text(size = 9), axis.title.x = element_blank(),
+        legend.position = "right")
+p.ratios <- ggplot(tb, aes(x = Type, y = Abundance, color = Taxon)) +
+    geom_path(aes(group = Taxon)) +
+    geom_point() +
+    facet_wrap(~Sample) +
+    scale_y_log10() +
+    scale_color_manual(values = colors.taxa) +
+    base_theme +
+    labs(y = "Ratio to Taxon 1") +
+    theme(strip.text = element_text(size = 9), axis.title.x = element_blank(),
+        legend.position = "right")
+cowplot::plot_grid(p.props, p.ratios, ncol = 1, align = "v", axis = "lr",
+    labels = c("A", "B"))
+```
+
+```{r, include = FALSE, eval = FALSE}
+ggsave(here("figures", "compositional_dependence_multipanel.pdf"),
+    width = 4.5, height = 5.5, units = "in", useDingbats = FALSE)
 ```
 
 From this figure, we can see that the error in the proportions differs for the
-three samples.
+three samples, but the error in ratios is consistent.
 
 Calculate the compositional error and the fold-error in proportions:
 ```{r}
@@ -155,19 +176,34 @@ err0 %>%
 We get very different pictures comparing the three samples based on the Actual
 or the Observed proportions.
 ```{r}
-ggplot(tb, aes(x = Sample, y = Proportion, fill = Taxon)) +
+p.props <- ggplot(tb, aes(x = Sample, y = Proportion, fill = Taxon)) +
     geom_bar(stat = "identity") +
     facet_wrap(~Type) +
     scale_y_continuous(breaks = c(0, 0.5, 1), labels = c(0, 0.5, 1)) +
     scale_fill_manual(values = colors.taxa) +
     base_theme +
     theme(strip.text = element_text(size = 9))
+
+p.ratios <- ggplot(tb, aes(x = Sample, y = Abundance, color = Taxon)) +
+    geom_path(aes(group = Taxon)) +
+    geom_point() +
+    facet_wrap(~Type) +
+    scale_y_log10() +
+    scale_color_manual(values = colors.taxa) +
+    base_theme +
+    labs(y = "Ratio to Taxon 1") +
+    theme(strip.text = element_text(size = 9))
+
+cowplot::plot_grid(p.props, p.ratios, ncol = 1)
 ```
 
 ```{r, include = FALSE, eval = FALSE}
 ggsave(here("figures", "community_clustering.pdf"),
-    width = 3, height = 2.5, units = "in", useDingbats = FALSE)
+    width = 3, height = 5.5, units = "in", useDingbats = FALSE)
 ```
+
+The lower panel shows that the change in ratios between samples is consistent
+whether using the actual and observed profiles.
 
 From this figure, it is apparent that Sample S1 is the most even and thus has
 the highest diversity by any metric that values evenness (such as the Shannon
