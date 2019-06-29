@@ -47,12 +47,6 @@ base_theme <- theme_tufte() +
         text = element_text(size=9, family = ""),
         legend.position = "none"
         )
-base_theme0 <- theme_grey() + 
-    theme(
-        panel.grid.major = element_blank(), 
-        panel.grid.minor = element_blank(),
-        panel.background = element_blank()
-        )
 tax_theme <- theme(
         axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1), 
         axis.title.x = element_blank())
@@ -60,6 +54,35 @@ tax_theme <- theme(
 update_geom_defaults("point", list(size = 1))
 update_geom_defaults("text", list(size = 2.5))
 update_geom_defaults("hline", list(color = "grey"))
+update_geom_defaults("abline", list(color = "grey"))
+# Colors for color scales
+colors.OkabeIto <-  tribble(
+    ~Name, ~Hex,
+    "orange", "#E69F00",
+    "sky blue", "#56B4E9",
+    "bluish green", "#009E73",
+    # "yellow", "#F0E442",
+    "blue", "#0072B2",
+    "vermilion", "#D55E00",
+    "reddish purple", "#CC79A7",
+    "black", "#000000",
+    # "grey", "#999999",
+    "yellow", "#F0E442",
+    )
+colors.taxon <- c(
+    "Atopobium_vaginae" = "#009E73",
+    "Gardnerella_vaginalis" = "#56B4E9",
+    "Lactobacillus_crispatus" = "#D55E00",
+    "Lactobacillus_iners" = "#000000",
+    "Prevotella_bivia" = "#0072B2",
+    "Sneathia_amnii" = "#CC79A7",
+    "Streptococcus_agalactiae" = "#E69F00") 
+colors.num_species <- c(
+    "2" = "#E69F00",
+    "3" = "#56B4E9",
+    "4" = "#CC79A7",
+    "7" = "#000000"
+    )
 ```
 
 
@@ -221,11 +244,15 @@ main0 <- main %>%
     filter(Expected, Num_species > 1) %>%
     mutate_by(Sample, 
         Observed = close_elts(Count),
-        Actual = close_elts(Expected)) %>%
+        Actual = close_elts(Expected),
+        Error = Observed / Actual) %>%
     select(-Count, -Expected) %>%
     select(Sample, Taxon, Observed, Actual, everything())
 ```
-Add copy-number bias for each taxon + experiment pair
+The Observed and Actual compositions are normalized to proportions for plotting
+in the next section. 
+
+Add copy-number bias for each taxon + experiment pair:
 ```{r}
 main0 <- main0 %>%
     left_join(cnbias %>% select(Mixture_type, Taxon, CN_bias),
@@ -244,6 +271,7 @@ main0 %>%
     geom_quasirandom() +
     facet_grid(Mixture_type ~ .) +
     geom_rangeframe(sides = "bl", color= "black") +
+    scale_color_manual(values = colors.taxon, labels = tax_labeller) + 
     labs(title = "Observed vs. Actual (log-odds)")
 ```
 
@@ -258,10 +286,11 @@ main0 %>%
     facet_grid(Mixture_type ~ Taxon) +
     geom_rangeframe(sides = "bl", color= "black") +
     labs(title = "Observed vs. Actual (log-odds)") +
+    scale_color_manual(values = colors.taxon, labels = tax_labeller) + 
     theme(legend.position = "none")
 ```
 
-The situation doesn't change noticeably with copy-number correction,
+What about after copy-number correction?
 ```{r}
 main0 <- main0 %>%
     mutate_by(Sample, CN_corrected = close_elts(Observed / CN_bias))
@@ -273,28 +302,23 @@ main0 %>%
     geom_quasirandom() +
     facet_grid(Mixture_type ~ .) +
     geom_rangeframe(sides = "bl", color= "black") +
+    scale_color_manual(values = colors.taxon, labels = tax_labeller) + 
     labs(title = "Observed with CN correction vs. Actual (log-odds)")
 ```
+
+The error in the DNA mixtures looks to be reduced. We return to the efficacy of
+CN correction later on.
 
 Now let's look at the taxon ratios, which we predict should show a consistent
 error. To do so, we first need a data frame with all the pairwise ratios for
 each sample,
 ```{r}
-ratios <- crossing(Sample = main$Sample %>% unique,
-    Taxon.x = taxa, Taxon.y = taxa)
-ratios <- ratios %>%
-    left_join(main0, by = c("Sample", "Taxon.x" = "Taxon")) %>%
-    left_join(main0 %>% select(Sample, Taxon, Observed, Actual, CN_bias), 
-        by = c("Sample", "Taxon.y" = "Taxon")) %>%
+gvs <- c("Mixture_type", "Sample", "Num_species")
+ratios <- main0 %>%
+    select(-Plate, -Barcode) %>%
+    compute_ratios(group_vars = gvs) %>%
+    filter(!is.na(Actual)) %>%
     mutate(Pair = paste(Taxon.x, Taxon.y, sep = ":"))
-ratios <- ratios %>%
-    filter(Actual.x, Actual.y) %>%
-    mutate(
-        Observed = Observed.x / Observed.y,
-        Actual = Actual.x / Actual.y, # Should always == 1
-        Error = Observed / Actual,
-        CN_error = CN_bias.x / CN_bias.y,
-    )
 ```
 
 Pick a non-redundant set of pairs for plotting,
@@ -306,7 +330,7 @@ and a reduced table for plotting the copy-number prediction (which only depends
 on the taxa pair and not the sample)
 ```{r}
 cn_ratios <- ratios %>%
-    select(Mixture_type, Pair, CN_error) %>%
+    select(Mixture_type, Pair, CN_bias) %>%
     distinct %>%
     filter(Pair %in% cmb)
 ```
@@ -317,65 +341,90 @@ p.pw <- ratios %>%
     filter(Pair %in% cmb) %>%
     ggplot(aes(Pair, Error, color = as.factor(Num_species))) +
     geom_hline(yintercept = 1) +
-    geom_quasirandom() +
     facet_grid(Mixture_type ~ .) +
     geom_rangeframe(sides = "l", color= "black") + 
     scale_y_log10() +
     scale_x_discrete(labels = tax_labeller) + 
+    scale_color_manual(values = colors.num_species) +
     tax_theme +
     theme(legend.position = "bottom")
 p.pw +
-    geom_point(data = cn_ratios, aes(Pair, CN_error), 
-        color = "darkred", shape = 3, size = 3)
+    geom_point(data = cn_ratios, aes(Pair, CN_bias), 
+        color = "darkred", shape = 3, size = 3) +
+    geom_quasirandom()
 ```
 
-The error in ratios is consistent across samples, as our model predicts. The
-disagreement with the ratio of 16S CNs shows that the error is poorly predicted
-by the expected copy-number bias.
+The error in ratios is consistent across samples, as our model predicts.
 
 # Bias estimation
 
-We estimate the bias within each experiment by minimizing the residual
-sum-of-squares defined by the Aitchison norm (as described in the Methods) and
-implemented in the `estimate_bias` function.
+Estimate bias w/ standard error,
 ```{r}
-bias <- main0 %>%
+set.seed(20190517)
+temp <- main0 %>%
     select(Mixture_type, Sample, Taxon, Observed, Actual) %>%
+    mutate(Error = Observed / Actual) %>%
     group_by(Mixture_type) %>%
     nest %>%
-    mutate(Fit = map(data, estimate_bias, method = "rss")) %>%
-    unnest(Fit)
-bias %>% spread(Mixture_type, Bias_est)
+    mutate(
+        Error_matrix = map(data, build_matrix, 
+            Sample, Taxon, Error, fill = NaN),
+        Estimate = map(Error_matrix, center, enframe = TRUE),
+        Bootreps = map(Error_matrix, bootrep_center, R = 4e3)
+    )
+est <- temp %>%
+    unnest(Estimate) %>%
+    rename(Bias = Center)
+bootreps <- temp %>%
+    unnest(Bootreps)
+stats <- bootreps %>%
+    group_by(Mixture_type, Taxon) %>%
+    summarize(gm_mean = gm_mean(Center), gm_se = gm_sd(Center)) %>%
+    ungroup
+bias <- left_join(est, stats, by = c("Mixture_type", "Taxon"))
+rm(temp)
 ```
-Compute the predicted proportions
+TODO: add some explanation of what is going on here.
+
+Check the results.
+```{r}
+bias %>%
+    print(n = Inf)
+bias <- select(bias, -gm_mean)
+```
+Add the bias estimate, predicted proportions, and residual _compositional_
+error
 ```{r}
 main0 <- main0 %>%
     left_join(bias, by = c("Mixture_type", "Taxon")) %>%
-    mutate_by(Sample, Predicted = close_elts(Actual * Bias_est))
+    mutate_by(Sample, 
+        Predicted = close_elts(Actual * Bias),
+        Residual = Observed / Predicted
+    )
 ```
 And also get the predicted ratios,
 ```{r}
-ratios.pred <- ratios %>%
-    select(Mixture_type, Taxon.x, Taxon.y, Pair) %>%
-    distinct() %>%
-    left_join(bias, by = c("Mixture_type", "Taxon.x" = "Taxon")) %>%
-    left_join(bias, by = c("Mixture_type", "Taxon.y" = "Taxon")) %>%
-    mutate(Predicted = Bias_est.x / Bias_est.y)
+ratios.pred <- bias %>%
+    select(Mixture_type, Taxon, Bias) %>%
+    compute_ratios(group_vars = c("Mixture_type")) %>%
+    rename(Predicted = Bias) %>%
+    mutate(Pair = paste(Taxon.x, Taxon.y, sep = ":"))
 ```
 
 Ratio errors are explained by the bias (Supplemental Figure SBrooksRatios)
 ```{r, fig.width = 6.5, fig.height = 6.5}
 # Put predictions underneath the geom layer showing the observed errors
-p.pw$layers <- c(
+p.pw +
     geom_point(data = ratios.pred %>% filter(Pair %in% cmb),
         aes(Pair, Predicted), inherit.aes = FALSE,
-        shape = 3, size = 4, color = "black"),
-    p.pw$layers)
-p.pw +
+        shape = 3, size = 4, color = "black") +
+    geom_quasirandom() +
     labs(color = "# species\nin mixture", y = "Observed / Actual") +
     base_theme +
     tax_theme +
-    theme(legend.position = "right")
+    theme(legend.position = "right",
+        plot.margin = margin(l = 0.2, unit = "in")
+    )
 ```
 ```{r, include = FALSE, eval = SAVE_FIGURES}
 ggsave(here("figures", "brooks2015_ratios_full.png"),
@@ -389,7 +438,7 @@ comparison, also get the prediction under no bias and under copy-number bias,
 ```{r}
 pred <- main0 %>%
     mutate(`No bias` = 1) %>%
-    rename(`Copy-number bias` = CN_bias, `Estimated bias` = Bias_est) %>%
+    rename(`Copy-number bias` = CN_bias, `Estimated bias` = Bias) %>%
     gather("Bias_type", "Bias", 
         `No bias`, `Copy-number bias`, `Estimated bias`) %>%
     mutate_by(c(Sample, Bias_type), Predicted = close_elts(Actual * Bias)) %>%
@@ -416,7 +465,7 @@ pred %>%
     summarize(Adist = anorm(Observed / Predicted)) %>%
     summarize(Adist = mean(Adist))
 ```
-Plot the log-odds with mean-squared errors,
+Plot the log-odds with mean-squared errors of the log-odds proportion,
 ```{r, fig.width = 6.5, fig.height = 6.5}
 p <- ggplot(pred, aes(logit(Predicted), logit(Observed), color = Taxon)) +
     geom_abline(intercept = 0, slope = 1, color = "grey") +
@@ -427,7 +476,7 @@ p <- ggplot(pred, aes(logit(Predicted), logit(Observed), color = Taxon)) +
     labs(x = "log-odds(Predicted proportion)", 
         y = "log-odds(Observed proportion)") +
     coord_fixed() +
-    scale_color_discrete(labels = tax_labeller) + 
+    scale_color_manual(values = colors.taxon, labels = tax_labeller) + 
     theme(
         panel.spacing.x = unit(1, "lines"),
         legend.position = "bottom",
@@ -482,7 +531,7 @@ p.A <- ggplot(pred0, aes(Actual, Observed, color = Taxon)) +
     geom_quasirandom() +
     # geom_jitter(width=0.02, height=0) +
     geom_rangeframe(color = "black", sides = "bl") +
-    scale_color_discrete(labels = tax_labeller) + 
+    scale_color_manual(values = colors.taxon, labels = tax_labeller) + 
     scale_x_continuous(limits = range.top,
         breaks = xtb$breaks, labels = xtb$labels) +
     scale_y_continuous(limits = range.top, 
@@ -496,7 +545,7 @@ p.B <- ggplot(pred0, aes(Predicted, Observed, color = Taxon)) +
         colour="grey") +
     geom_point() +
     geom_rangeframe(color = "black") +
-    scale_color_discrete(labels = tax_labeller) + 
+    scale_color_manual(values = colors.taxon, labels = tax_labeller) + 
     scale_x_continuous(limits = range.top, 
         breaks = c(0, 0.5, 1), labels = c("0", "0.5", "1")) +
     scale_y_continuous(limits = range.top, 
@@ -541,6 +590,7 @@ p.C <-
     scale_y_log10(limits = range.bot, breaks = c(0.02, 0.1, 1, 10, 30), 
         labels = log_formatter) +
     scale_x_discrete(labels = tax_labeller) + 
+    scale_color_manual(values = colors.num_species) +
     base_theme +
     tax_theme
 p.D <- ggplot(ratios0, aes(Pair, Error, color = as.factor(Num_species), 
@@ -562,6 +612,7 @@ p.D <- ggplot(ratios0, aes(Pair, Error, color = as.factor(Num_species),
         labels = log_formatter) +
     scale_x_discrete(labels = tax_labeller) + 
     scale_shape_manual(name = "", values = c(16, 3)) +
+    scale_color_manual(values = colors.num_species) +
     labs(title = "Fold error in taxon ratios with model prediction",
         y = "Observed / Actual", 
         color = "# species\nin mixture") +
@@ -588,138 +639,407 @@ ggsave(here("figures", "brooks2015_4panel.png"),
     width = 6.5, height = 5.5, units = "in", scale = 4/3)
 ```
 
-# Bias of workflow components and compared to CN bias
+## Fraction of squared Aitchison error due to bias
 
-Bias broken down into steps:
+```{r}
+err <- main0 %>%
+    group_by(Mixture_type, Sample) %>%
+    summarize(
+        Error2 = anorm(Observed / Actual)^2,
+        Bias2 = anorm(Bias)^2,
+        Resid2 = anorm(Observed / (Actual * Bias))^2
+        ) %>%
+    summarize_at(vars(-Sample), sum)
+err <- err %>% 
+    mutate(Frac_Bias = Bias2 / Error2, Frac_Resid = Resid2 / Error2)
+err
+```
+
+# Bias of each step in the workflow
+
+Compute Bias for each step:
 ```{r}
 bias_steps <- bias %>% 
-    spread(Mixture_type, Bias_est) %>%
+    select(Mixture_type, Taxon, Bias) %>%
+    spread(Mixture_type, Bias) %>%
+    mutate(Extraction = Cells / DNA,
+        PCR = DNA / PCR_product,
+        Sequencing = PCR_product
+    )
+bias_steps
+```
+Add copy-number correction as a hypothetical final step in the bioinformatics
+pipeline. CN correction involves dividing by the CN for each taxon, and thus
+has a bias given by the reciprocal of the CNs.
+```{r}
+cn_corr <- species_info %>% 
+    transmute(Taxon, CN_correction = center_elts(1 / Copy_number))
+bias_steps <- left_join(bias_steps, cn_corr, by = c("Taxon")) %>%
+    mutate(Total = Extraction * PCR * Sequencing * CN_correction)
+```
+Gather back into tidy form
+```{r}
+bias_steps <- bias_steps %>%
+    gather("Type", "Bias", -Taxon)
+```
+Get standard errors from the `bootreps`,
+```{r}
+bootreps0 <- bootreps %>%
+    spread(Mixture_type, Center) %>%
     mutate(
-        Total = Cells,
         Extraction = Cells / DNA,
         PCR = DNA / PCR_product,
         Sequencing = PCR_product
-    ) %>%
-    arrange(Total)
-bias_steps
-```
-
-## Table
-
-Add summary rows with the geometric range and geometric standard deviation
-```{r}
-bias_steps0 <- bias_steps %>%
-    gather("Type", "Bias", -Taxon) %>%
-    # replace underscores to spaces for plotting
-    mutate_at(vars(Taxon, Type), str_replace, "_", " ")
-bias_steps_summary <- bias_steps0 %>%
-    group_by(Type) %>%
-    summarize(
-        `Gm. range` = gm_range(Bias),
-        `Gm. std. dev.` = gm_sd(Bias),
-    ) %>%
-    gather("Statistic", "Value", -Type)
-bias_steps0 <- bind_rows(
-    bias_steps0, 
-    bias_steps_summary %>% rename(Taxon = Statistic, Bias = Value)
     )
-lvls <- c(bias_steps$Taxon %>% str_replace("_", " "),
-    "Gm. range", "Gm. std. dev.")
-bias_steps0 <- bias_steps0 %>%
-    mutate(Taxon = factor(Taxon, lvls))
-bias_steps0 %>%
-    spread(Type, Bias)
+ses <- bootreps0 %>%
+    gather("Type", "Bias", -.id, -Taxon) %>%
+    group_by(Taxon, Type) %>%
+    summarize(gm_se = gm_sd(Bias)) %>%
+    ungroup
+```
+Join Bias w/ the standard errors:
+```{r}
+bias_steps <- left_join(bias_steps, ses, by = c("Type", "Taxon"))
+```
+Because CN correction is deterministic, the geometric standard error is 1.
+```{r}
+bias_steps <- bias_steps %>%
+    mutate(gm_se = ifelse(Type == "CN_correction", 1, gm_se))
 ```
 
-Use `kable` and `kableExtra` to make the table for the text (as latex code)
+Create the 2-panel figure for the main text, showing the bias estimates in the
+left panel and the predicted composition through the workflow in the right
+panel.
 ```{r}
-tex <- bias_steps0 %>%
+# We will order the taxa by the in the legend by which are observed as most
+# abundant in an actual even mixture; this will be the taxa with the largest
+# "Total" bias.
+lvls.taxon <- bias_steps %>%
+    filter(Type == "Total") %>%
+    arrange(Bias) %>%
+    .$Taxon
+# Order for the steps (left panel)
+lvls.step <- c("Extraction", "PCR", "Sequencing", "CN_correction")
+labs.step <- c("Extraction", "PCR", "Seq. + Inf.", "CN correction")
+names(labs.step) <- c("Extraction", "PCR", "Sequencing", "CN_correction")
+# Labels for the positions (right panel)
+# labs.position <- c("Actual", "Post extraction", "Post PCR", "Reads", 
+#             "CN corrected")
+labs.position <- c("Cells", "DNA", "PCR product", "Reads", "Reads / CN")
+names(labs.position) <- paste0("T", 0:4)
+# Tibble of the relative abundances through the workflow (right panel)
+ra_steps <- bias_steps %>%
+    select(Taxon, Type, Bias) %>%
     spread(Type, Bias) %>%
-    select(Taxon, Cells, DNA, `PCR prod.` = `PCR product`, Extraction, PCR) %>%
-    mutate(Taxon = kableExtra::cell_spec( Taxon, "latex", 
-            italic = Taxon %in% lvls[1:7])
+    transmute(Taxon,
+        T0 = 1,
+        T1 = T0 * Extraction, 
+        T2 = T1 * PCR, 
+        T3 = T2 * Sequencing,
+        T4 = T3 * CN_correction,
         ) %>%
-    mutate_at(vars(-Taxon), signif, 2) %>%
-    mutate_at(vars(-Taxon), as.character) %>%
-    knitr::kable(format="latex", booktabs = TRUE, linesep = "",
-        escape = FALSE, align = c("l", "r", "r", "r", "r", "r")) %>%
-    # knitr::kable(digits=1, format="latex", booktabs = TRUE, linesep = "",
-    #     escape = FALSE) %>%
-    # kableExtra::kable_styling(latex_options = "striped")
-    kableExtra::add_header_above(c(" ", "Mixtures" = 3, "Steps" = 2)) %>%
-    kableExtra::row_spec(7, extra_latex_after = "\\midrule")
-tex
+    mutate(Taxon = fct_reorder(Taxon, T4)) %>%
+    gather("Position", "Abundance", -Taxon)
+# shared params
+# ylimits <- ra_steps$Abundance %>% range
+ylimits <- c(0.1, 6)
+xexpand <- c(0.1, 0.1)
+## Left panel
+# Tibble for reference line
+ref.left <- tibble(Step = factor(lvls.step, lvls.step), Bias = 1)
+# make plot
+p.left <- bias_steps %>% 
+    filter(Type %in% lvls.step) %>%
+    mutate(
+        Step = factor(Type, lvls.step),
+        Taxon = factor(Taxon, levels(ra_steps$Taxon))
+        ) %>%
+    ggplot(aes(Step, Bias, color = Taxon)) +
+    geom_path(data = ref.left, aes(group = Bias), color = "grey") +
+    # geom_quasirandom(width = 0.2) +
+    geom_pointrange(aes(ymin = Bias / gm_se^2, ymax = Bias * gm_se^2),
+        fatten = 0.5,
+        position = position_dodge(width = 0.3)) +
+    scale_y_log10(limits = ylimits, labels = log_formatter) +
+    scale_x_discrete(expand = xexpand,labels = labs.step) +
+    geom_rangeframe(color = "black") +
+    scale_color_manual(values = colors.taxon, labels = tax_labeller) + 
+    labs(x = "Step", y = "Efficiency / Gm. mean", 
+        title = "Bias of each step") +
+    guides(color = guide_legend(reverse = TRUE)) +
+    base_theme
+## Right panel
+# Tibble for reference line
+ref.right <- tibble(Position = names(labs.position), Abundance = 1)
+# make plot
+p.right <- ra_steps %>%
+    ggplot(aes(Position, Abundance, color = Taxon)) +
+    geom_path(data = ref.right, aes(group = Abundance), color = "grey") +
+    geom_path(aes(group = Taxon)) +
+    geom_point() +
+    scale_y_log10(limits = ylimits, breaks = c(0.1, 0.3, 1, 3, 10), 
+        labels = log_formatter) +
+    scale_x_discrete(labels = labs.position, expand = xexpand) +
+    geom_rangeframe(color = "black") +
+    scale_color_manual(values = colors.taxon, labels = tax_labeller) + 
+    # labs(x = "Position in the workflow", y = "Abundance / Gm. mean", 
+    labs(x = "Biological substance", y = "Abundance / Gm. mean", 
+        title = "Composition through the workflow") +
+    guides(color = guide_legend(reverse = TRUE)) +
+    base_theme
+l <- get_legend(p.right + theme(legend.position = c(0.45, 0.55), 
+        plot.margin = margin(t=5, b=5)))
 ```
 
-## SI plots
-
-Add the copy-number and genome size for comparison purposes
-```{r}
-bias_steps1 <- bias_steps %>%
-    left_join(species_info, by = "Taxon")
+```{r, fig.width = 8, fig.height = 3}
+plot_grid(
+    # p.left + theme(plot.margin = margin(l=5, t=5, b=5)),
+    # p.right + theme(plot.margin = margin(t=5, b=5)),
+    p.left,
+    p.right,
+    l,
+    labels = c("A", "B", NULL),
+    nrow = 1, rel_widths = c(1, 1, 0.3))
 ```
 
-Get abbreviations for each species labeling plot points.
-```{r}
-bias_steps1 <- bias_steps1 %>%
-    mutate(Genus_species = Taxon) %>%
-    separate(Genus_species, c("Genus", "Species"), sep = "_") %>%
-    mutate(Taxon_abbrev = paste0(str_sub(Genus, 1, 1), 
-            str_sub(Species, 1, 2))) %>%
-    select(-Genus, -Species)
-bias_steps1 %>% 
-    select(Taxon, Taxon_abbrev) %>% 
-    distinct %>% 
-    arrange(Taxon)
+```{r, include = FALSE, eval = SAVE_FIGURES}
+ggsave(here("figures", "brooks2015_bias_workflow.png"),
+    width = 8, height = 3, units = "in")
+ggsave(here("figures", "brooks2015_bias_workflow.pdf"),
+    width = 8, height = 3, units = "in", useDingbats = FALSE)
 ```
 
-Plot various comparisons,
+# Bias versus 16S CN 
+
+How much PCR bias and total bias is explained by 16S CN variation?
+
+Note: The "Total" variable in `bias_steps` includes CN correction; here we are
+interested in the total bias observed in the cell mixtures without CN
+correction being applied.
+
+For this analysis I'm going to ignore the uncertainty in the estimate of the
+total bias and the PCR bias, since the standard errors are small relative to
+the magnitude of the bias,
 ```{r}
-mappings <- list(
-    aes(log(Extraction), log(Total)),
-    aes(log(PCR), log(Total)),
-    aes(log(Extraction), log(PCR)),
-    aes(log(Copy_number), log(Total)),
-    aes(log(Copy_number), log(PCR)),
-    aes(log(Copy_number / Genome_size), log(PCR))
-)
-num_format <- function (x) scales::number(x, accuracy = 0.1)
-plots <- mappings %>%
-    map(~ggplot(bias_steps1, .) + 
-        geom_text(aes(color = Taxon, label = Taxon_abbrev)) +
-        base_theme +
-        geom_rangeframe()
-    ) %>%
-    map(~ . +
-        scale_x_continuous(breaks = c(range(xy_values(.)$x), 0),
-            labels = num_format) +
-        scale_y_continuous(breaks = c(range(xy_values(.)$y), 0),
-            labels = num_format)
-        # scale_x_continuous(breaks = c(layer_scales(.)$x$range$range, 0)) +
-        # scale_y_continuous(breaks = c(layer_scales(.)$y$range$range, 0))
+bias_steps %>%
+    filter(Type == "Cells")
+bias_steps %>%
+    filter(Type == "PCR")
+```
+
+First let's get a table with all the various bias estimates as well as CN and
+genome size, with elements centered (divided by the geometric mean over taxa).
+```{r}
+tb <- bias_steps %>%
+    select(-gm_se) %>%
+    spread(Type, Bias) %>%
+    left_join(species_info, by = "Taxon") %>%
+    select(Taxon, Cells, PCR, Copy_number, Genome_size) %>%
+    mutate_if(is.numeric, center_elts)
+tb
+```
+Next, we compute the predicted bias based on copy-number variation. The
+expected PCR bias is given by the CN per bp for the PCR step, and by the CN per
+genome for the total bias measured in the cell mixtures.
+```{r}
+tb <- tb %>%
+    mutate(
+        Cells.pred = Copy_number, 
+        PCR.pred = Copy_number / Genome_size,
+        Cells.resid = Cells / Cells.pred,
+        PCR.resid = PCR / PCR.pred
     )
 ```
 
-SI figure comparing extraction and PCR bias effects of total bias:
-```{r, fig.width = 6.5, fig.height = 2}
-plot_grid(plotlist = plots[1:3], nrow = 1, labels = "AUTO")
+How much of the bias is explained by CN variation? We will quantify the bias
+and the residual bias by the squared error as measured by the Aitchison norm,
+and compute a coefficient of determination quantifying how much of the bias is
+explained by the predicted bias from CN.
+```{r}
+an2 <- tb %>%
+    summarize_if(is.numeric, ~anorm(.)^2) %>% 
+    unlist %>%
+    as.list
+```
+The coefficient of determination for CN variation as an explanation of PCR bias
+is
+```{r}
+1 - an2$PCR.resid / an2$PCR
+```
+and of total bias is
+```{r}
+1 - an2$Cells.resid / an2$Cells
+```
+These numbers are equivalant to computing the standard R^2 measure on the
+log-transformed bias vectors. E.g.,
+```{r}
+tb0 <- tb %>%
+    mutate_if(is.numeric, log)
+mu <- mean(tb0$PCR)
+1 - sum((tb0$PCR - tb0$PCR.pred)^2) / sum((tb0$PCR - mu)^2)
+```
+
+Supplemental figure plotting bias against copy number:
+```{r}
+p.pcr <- tb %>%
+    mutate(Taxon.abbrev = tax_abbrev(Taxon)) %>%
+    ggplot(aes(Copy_number / Genome_size, PCR, label = Taxon.abbrev)) +
+    geom_abline() +
+    geom_text() +
+    scale_x_log10(expand = expand_scale(mult = 0.1)) +
+    scale_y_log10() +
+    geom_rangeframe() +
+    coord_fixed() +
+    labs(title = "PCR bias vs. copy number", y = "Efficiency / gm. mean", 
+        x = "16S copies per bp / gm. mean") +
+    base_theme
+p.tot <- tb %>%
+    mutate(Taxon.abbrev = tax_abbrev(Taxon)) %>%
+    ggplot(aes(Copy_number, Cells, label = Taxon.abbrev)) +
+    geom_abline() +
+    geom_text() +
+    scale_x_log10(expand = expand_scale(mult = 0.25)) +
+    scale_y_log10() +
+    geom_rangeframe() +
+    coord_fixed() +
+    labs(title = "Total bias vs. copy number", y = "Efficiency / gm. mean", 
+        x = "16S copies per genome / gm. mean") +
+    base_theme
+plot_grid(p.pcr, p.tot, nrow = 1, labels = c("A", "B"), rel_widths = c(1, 1))
 ```
 
 ```{r, include = FALSE, eval = SAVE_FIGURES}
-ggsave(here("figures", "brooks2015_bias_steps.png"),
-    width = 6.5, height = 2.0, units = "in")
+ggsave(here("figures", "brooks2015_bias_vs_cn.pdf"),
+    width = 6, height = 3.0, units = "in", useDingbats = FALSE)
+ggsave(here("figures", "brooks2015_bias_vs_cn.png"),
+    width = 6, height = 3.0, units = "in")
 ```
 
-SI figure showing poor correlation with copy-number bias:
-```{r, fig.width = 6.5, fig.height = 2}
-plot_grid(plotlist = plots[4:6], nrow = 1, labels = "AUTO")
+
+# Table with estimated bias and summary statistics
+
+## Compute pairwise-error summary statistics
+
+### Mixture experiments: Bias and noise
+
+Get the ratios with the estimated bias and the residuals,
+```{r}
+ratios1 <- main0 %>%
+    select(Sample, Taxon, Mixture_type, Observed, Actual, Error, Bias,
+        Residual) %>%
+    mutate(Taxon = tax_abbrev(Taxon)) %>%
+    compute_ratios(group_vars = c("Mixture_type", "Sample")) %>%
+    filter(!is.na(Actual)) %>%
+    mutate(Pair = paste(Taxon.x, Taxon.y, sep = ":"))
+```
+Compute pairwise error summary statistics:
+```{r}
+avg_errors <- ratios1 %>%
+    # Take the geometric absolute values of the errors
+    mutate_at(vars(Error, Bias, Residual), gm_abs) %>%
+    # Average the errors for each pair of different taxa
+    filter(Taxon.x != Taxon.y) %>%
+    group_by(Mixture_type, Taxon.x, Taxon.y) %>%
+    summarize_at(vars(Error, Bias, Residual), gm_mean) %>%
+    # Average over pairs of taxa for each mixture type
+    group_by(Mixture_type) %>%
+    summarize_at(vars(Error, Bias, Residual), gm_mean) %>%
+    rename_at(vars(Error, Bias, Residual), paste0, ".avg")
+max_errors <- ratios1 %>%
+    # Take the geometric absolute values of the errors
+    mutate_at(vars(Error, Bias, Residual), gm_abs) %>%
+    # Find the max fold error in a ratio for each mixture type
+    group_by(Mixture_type) %>%
+    summarize_at(vars(Error, Bias, Residual), gm_range) %>%
+    rename_at(vars(Error, Bias, Residual), paste0, ".max")
+pw_summary <- bind_cols(avg_errors, max_errors) %>%
+    select(Type = Mixture_type, Bias.max, Bias.avg, Residual.avg)
+pw_summary
 ```
 
-```{r, include = FALSE, eval = SAVE_FIGURES}
-ggsave(here("figures", "brooks2015_bias_cn.png"),
-    width = 6.5, height = 2.0, units = "in")
+### Workflow steps: Bias only
+
+Similarly, compute pairwise bias summary statistics for each protocol step
+```{r}
+bias_steps.ratios <- bias_steps %>%
+    filter(Type %in% c("Extraction", "PCR", "Sequencing")) %>%
+    select(Type, Taxon, Bias) %>%
+    compute_ratios(group_vars = c("Type"))
+avg_bias_steps <- bias_steps.ratios %>%
+    mutate_at(vars(Bias), gm_abs) %>%
+    filter(Taxon.x != Taxon.y) %>%
+    group_by(Type, Taxon.x, Taxon.y) %>%
+    summarize_at(vars(Bias), gm_mean) %>%
+    group_by(Type) %>%
+    summarize_at(vars(Bias), gm_mean) %>%
+    rename_at(vars(Bias), paste0, ".avg")
+max_bias_steps <- bias_steps.ratios %>%
+    mutate_at(vars(Bias), gm_abs) %>%
+    group_by(Type) %>%
+    summarize_at(vars(Bias), gm_range) %>%
+    rename_at(vars(Bias), paste0, ".max")
+pw_summary_steps <- bind_cols(avg_bias_steps, max_bias_steps) %>%
+    select(Type, Bias.max, Bias.avg)
+pw_summary_steps
 ```
 
+## Combine with bias estimates in a single table
+
+```{r}
+# Function to create string for formatting numbers with glue::glue()
+fmt_string <- function(var, digits) {
+    paste0("{format(", var, ", digits = ", digits, ")}")
+}
+bias_tab <- bias_steps %>%
+    select(-gm_se) %>%
+    mutate(Bias = glue::glue(fmt_string("Bias", 1))) %>%
+    mutate_all(as.character) %>%
+    spread(Type, Bias) %>%
+    select(Taxon, Cells, DNA, PCR_product, Extraction, PCR, Sequencing)
+pw_summary_tab <- bind_rows(pw_summary, pw_summary_steps) %>%
+    mutate(
+        Bias.max = glue::glue(fmt_string("Bias.max", 2)),
+        Bias.avg = glue::glue(fmt_string("Bias.avg", 2)),
+        Residual.avg = glue::glue(fmt_string("Residual.avg", 2))
+        ) %>%
+    mutate_all(as.character) %>%
+    gather("Taxon", "Value", -Type) %>%
+    spread(Type, Value) %>%
+    mutate_all(~ifelse(str_detect(., "NA"), "---", .))
+# Order taxa from highest to lowest efficiency in the cell mixtures
+taxa.ranked <- bias %>%
+    filter(Mixture_type == "Cells") %>%
+    arrange(-Bias) %>%
+    {.$Taxon}
+lvls.taxon <- c(taxa.ranked, "Bias.max", "Bias.avg", "Residual.avg")
+lbls.taxon <- c(taxa.ranked, "Max pairwise bias", 
+    "Avg. pairwise bias", "Avg. pairwise noise")
+bias_tab0 <- bind_rows(bias_tab, pw_summary_tab) %>%
+    mutate(
+        Taxon = factor(Taxon, lvls.taxon, lbls.taxon),
+        ) %>%
+    arrange(Taxon)
+bias_tab0
+```
+
+Latex version for the manuscript:
+```{r}
+tex <- bias_tab0 %>%
+    rename(`PCR prod.` = PCR_product, `Seq. + Inf.` = Sequencing) %>%
+    mutate(
+        Taxon = kableExtra::cell_spec(
+            str_replace(Taxon, "_", " "), 
+            "latex", 
+            italic = Taxon %in% taxa)
+        ) %>%
+    knitr::kable(format="latex", booktabs = TRUE, linesep = "",
+        escape = FALSE, align = c("l", rep("r", 6))) %>%
+    kableExtra::add_header_above(c(" ", "Mixtures" = 3, 
+            "Steps" = 3)) %>%
+    kableExtra::row_spec(length(taxa), extra_latex_after = "\\midrule")
+# tex
+# clipr::write_clip(tex)
+```
 
 # Calibration
 
@@ -732,12 +1052,16 @@ Estimate bias as before,
 bias.7sp <- main0 %>%
     filter(Num_species == 7) %>%
     select(Mixture_type, Sample, Taxon, Observed, Actual) %>%
+    mutate(Error = Observed / Actual) %>%
     group_by(Mixture_type) %>%
     nest %>%
-    mutate(Fit = map(data, estimate_bias, method = "rss")) %>%
-    unnest(Fit) %>%
-    rename(Bias_est_7sp = Bias_est)
-# bias.7sp %>% spread(Mixture_type, Bias_est)
+    mutate(
+        Error_matrix = map(data, build_matrix, 
+            Sample, Taxon, Error, fill = NaN),
+        Estimate = map(Error_matrix, center, enframe = TRUE),
+    ) %>%
+    unnest(Estimate) %>%
+    rename(Bias_7sp = Center)
 ```
 
 Compare the two bias estimates:
@@ -751,8 +1075,8 @@ Get calibrated compositions from both:
 cal <- main0 %>%
     left_join(bias.7sp, by = c("Mixture_type", "Taxon")) %>%
     mutate_by(Sample,
-        Calibrated_all = close_elts(Observed / Bias_est),
-        Calibrated_7sp = close_elts(Observed / Bias_est_7sp)
+        Calibrated_all = close_elts(Observed / Bias),
+        Calibrated_7sp = close_elts(Observed / Bias_7sp)
     ) %>%
     gather("Estimate_type", "Estimate", 
         Observed, Calibrated_all, Calibrated_7sp) %>%
@@ -767,12 +1091,13 @@ ggplot(cal, aes(Taxon, odds(Estimate) / odds(Actual),
     geom_quasirandom() +
     scale_y_log10() + 
     facet_grid(Mixture_type ~ Estimate_type) +
+    scale_color_manual(values = colors.num_species) +
     tax_theme
 ```
 
 As expected, the improvement isn't as great but is still substantial for the
 cell and DNA mixtures. In the cell mixtures, there seems to be a systematic
-underestimate of G.  vaginalis and A. vaginae and a corresponding overestiamate
+underestimate of G. vaginalis and A. vaginae and a corresponding over-estimate
 of others such as P bivia. This could be due to chance over-representation of
 Gv and Av in the 7sp mixtures, e.g. due to sample construction error.
 
@@ -801,7 +1126,6 @@ cal %>%
     ) %>%
     summarize_at(vars(Dist.BC, Dist.Ai), mean)
 ```
-
 
 # Model comparisons
 
@@ -839,10 +1163,11 @@ preds.slm <- fits.slm %>%
 ggplot(preds.slm, aes(.fitted, Observed, color = Taxon)) +
     geom_quasirandom() +
     facet_grid(Mixture_type ~ Model) +
+    scale_color_manual(values = colors.taxon, labels = tax_labeller) + 
     labs(c = "Model prediction")
 ```
 
-The models are very similar, so we'll use the simpler model (with no intercept
+The fits are very similar, so we'll use the simpler model (with no intercept
 term) from here on.
 ```{r, fig.height = 6.5, fig.width = 7.5}
 preds.slm <- preds.slm %>%
@@ -924,7 +1249,7 @@ ggplot(preds, aes(logit(Predicted), logit(Observed), color = Taxon)) +
     labs(x = "log-odds(Predicted proportion)", 
         y = "log-odds(Observed proportion)") +
     coord_fixed() +
-    scale_color_discrete(labels = tax_labeller) + 
+    scale_color_manual(values = colors.taxon, labels = tax_labeller) + 
     theme(
         panel.spacing.x = unit(1, "lines"),
         legend.position = "bottom",
