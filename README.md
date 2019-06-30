@@ -71,7 +71,3 @@ rendered to html can be seen at
 * [Analysis of the Costea et al (2017) dataset](https://mikemc.github.io/2019-bias-manuscript/analysis/costea2017-analysis.html)
 * [Calculations for conceptual examples discussed in the manuscript](https://mikemc.github.io/2019-bias-manuscript/analysis/conceptual-examples.html)
 * [Estimating genome statistics for the Brooks et al (2015) species](https://mikemc.github.io/2019-bias-manuscript/analysis/brooks2015-species-info.html)
-
-The `vignettes/` folder contains a demonstration on simulated data of the bias
-estimation procedure we use in our main analysis.  A rendered version can be
-found [here](https://mikemc.github.io/2019-bias-manuscript/vignettes/bias-estimation-demo.html). 
