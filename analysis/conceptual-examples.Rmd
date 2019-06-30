@@ -27,6 +27,7 @@ library(tidyverse)
 library(ggthemes)
 # library(cowplot)
 # library(ggbeeswarm)
+library(metacal)
 # This package
 devtools::load_all(here())
 ```

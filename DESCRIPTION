@@ -17,6 +17,7 @@ RoxygenNote: 6.1.1
 Imports:
     useful,
     magrittr,
+    metacal,
     MASS,
     tidyverse
 Suggests: 
@@ -30,6 +31,5 @@ Suggests:
     knitr,
     kableExtra,
     rmarkdown,
-    usethis,
-    testthat
+    usethis
 VignetteBuilder: knitr

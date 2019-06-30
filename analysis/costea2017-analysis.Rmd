@@ -34,6 +34,8 @@ library(tidyverse)
 library(ggthemes)
 library(cowplot)
 library(ggbeeswarm)
+# Functions for bias estimation and calibration
+library(metacal)
 # This package
 devtools::load_all(here())
 ```

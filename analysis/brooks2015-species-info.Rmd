@@ -39,9 +39,6 @@ library(ggbeeswarm)
 library(ape)
 library(ggtree)
 library(tidytree)
-
-# This package
-devtools::load_all(here())
 ```
 
 Path where the rrnDB and GTDB data are stored:
@@ -331,7 +328,7 @@ rrn %>%
 ```
 These results suggest that a value of 1-2 is reasonable, but leave it pretty
 ambiguous which is better. Since the value of 1 in the NCBI annotation for A.
-vaginae could be an assembly or annotation error, I will go with the larger
+vaginae is plausibly an assembly or annotation error, I will go with the larger
 value of 2 found by Yuan2012.
 
 ## Final table
@@ -356,7 +353,7 @@ brooks2015_species_info
 ```
 Save for use in the main analysis:
 ```{r}
-usethis::use_data(brooks2015_species_info, overwrite = TRUE)
+usethis::use_data(brooks2015_species_info)
 ```
 Also make a latex version for use as a supplemental table,
 ```{r, eval = F}
