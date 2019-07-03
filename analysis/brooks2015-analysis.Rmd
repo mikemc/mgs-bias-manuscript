@@ -917,6 +917,40 @@ ggsave(here("figures", "brooks2015_bias_vs_cn.png"),
     width = 6, height = 3.0, units = "in")
 ```
 
+### Permutation tests
+
+I use a permutation test to see whether the fraction of the bias explained by
+copy number could be due to chance, for PCR bias and the total (Cells) bias. In
+particular, I compute the p-value as the fraction of permutations of the
+predicted bias that gives a squared error (residual bias, measured by the
+Aitchison norm) less than or equal to the observed error,
+```{r}
+K <- nrow(tb)
+perms <- gtools::permutations(K, K)
+# the residual bias we observe
+pcr_obs <- anorm(tb$PCR / tb$PCR.pred)^2
+cells_obs <- anorm(tb$Cells / tb$Cells.pred)^2
+# the residual bias for each permutation
+pcr_perms  <- apply(perms, 1, 
+    function (x) { anorm(tb$PCR / tb$PCR.pred[x])^2 })
+cells_perms  <- apply(perms, 1, 
+    function (x) { anorm(tb$Cells / tb$Cells.pred[x])^2 })
+# the p values
+pcr_pval <- mean(pcr_perms <= pcr_obs) %>% round(3)
+cells_pval <- mean(cells_perms <= cells_obs) %>% round(3)
+```
+
+```{r, fig.width = 8}
+p.pcr <- qplot(pcr_perms) + 
+    geom_vline(xintercept = pcr_obs) +
+    labs(title = paste0("PCR bias vs. copy number; p = ", pcr_pval), 
+        x = "Squared Aitchison error")
+p.cells <- qplot(cells_perms) + 
+    geom_vline(xintercept = cells_obs) +
+    labs(title = paste0("Total bias vs. copy number; p = ", cells_pval), 
+        x = "Squared Aitchison error")
+plot_grid(p.pcr, p.cells)
+```
 
 # Table with estimated bias and summary statistics
 
