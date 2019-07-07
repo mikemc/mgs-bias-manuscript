@@ -15,10 +15,8 @@ Encoding: UTF-8
 LazyData: false
 RoxygenNote: 6.1.1
 Imports:
-    useful,
     magrittr,
     metacal,
-    MASS,
     tidyverse
 Suggests: 
     cowplot,
@@ -28,6 +26,7 @@ Suggests:
     ggstance,
     ggthemes,
     ggbeeswarm,
+    gtools,
     knitr,
     kableExtra,
     rmarkdown,
