@@ -37,7 +37,7 @@ library(ggthemes)
 library(cowplot); theme_set(theme_grey()) 
 library(ggbeeswarm)
 # Functions for bias estimation and calibration
-library(metacal)
+library(metacal); packageVersion("metacal")
 # This package
 devtools::load_all(here())
 ```
@@ -47,6 +47,8 @@ Options for `ggplot`:
 base_theme <- theme_tufte() + 
     theme(
         text = element_text(size=9, family = ""),
+        strip.text = element_text(size=9, family = ""),
+        # axis.text = element_text(size=8, family = ""),
         legend.position = "none"
         )
 tax_theme <- theme(
@@ -75,7 +77,8 @@ colors.taxon <- c(
     "Atopobium_vaginae" = "#009E73",
     "Gardnerella_vaginalis" = "#56B4E9",
     "Lactobacillus_crispatus" = "#D55E00",
-    "Lactobacillus_iners" = "#000000",
+    # "Lactobacillus_iners" = "#000000",
+    "Lactobacillus_iners" = "#505050",
     "Prevotella_bivia" = "#0072B2",
     "Sneathia_amnii" = "#CC79A7",
     "Streptococcus_agalactiae" = "#E69F00") 
@@ -83,8 +86,11 @@ colors.num_species <- c(
     "2" = "#E69F00",
     "3" = "#56B4E9",
     "4" = "#CC79A7",
-    "7" = "#000000"
+    # "7" = "#000000"
+    "7" = "#505050"
     )
+# Width of figures in elife latex template pdf when width=\fullwidth is used
+# elife_width = 5.626
 ```
 
 
@@ -386,8 +392,6 @@ stats <- bootreps %>%
 bias <- left_join(est, stats, by = c("Mixture_type", "Taxon"))
 rm(temp)
 ```
-TODO: add some explanation of what is going on here.
-
 Check the results.
 ```{r}
 bias %>%
@@ -414,7 +418,7 @@ ratios.pred <- bias %>%
 ```
 
 Ratio errors are explained by the bias (Supplemental Figure SBrooksRatios)
-```{r, fig.width = 6.5, fig.height = 6.5}
+```{r, fig.width = 7, fig.height = 7}
 # Put predictions underneath the geom layer showing the observed errors
 p.pw +
     geom_point(data = ratios.pred %>% filter(Pair %in% cmb),
@@ -429,10 +433,8 @@ p.pw +
     )
 ```
 ```{r, include = FALSE, eval = SAVE_FIGURES}
-ggsave(here("figures", "brooks2015_ratios_full.png"),
-    width = 6.5, height = 6.5, units = "in")
-ggsave(here("figures", "brooks2015_ratios_full.pdf"),
-    width = 6.5, height = 6.5, units = "in", useDingbats = FALSE)
+ggsave(here("figures", "brooks-ratios.pdf"),
+    width = 7, height = 7, units = "in", useDingbats = FALSE)
 ```
 
 Get the prediction of our measurements given the estimated bias. For
@@ -472,7 +474,7 @@ pred %>%
     summarize(Adist = mean(Adist))
 ```
 Plot the log-odds with mean-squared errors of the log-odds proportion,
-```{r, fig.width = 6.5, fig.height = 6.5}
+```{r, fig.width = 7, fig.height = 7}
 p <- ggplot(pred, aes(logit(Predicted), logit(Observed), color = Taxon)) +
     geom_abline(intercept = 0, slope = 1, color = "grey") +
     geom_jitter(width = 0.1, height = 0) +
@@ -495,10 +497,8 @@ p
 ```
 
 ```{r, include = FALSE, eval = SAVE_FIGURES}
-ggsave(here("figures", "brooks2015_proportions_full.png"),
-    width = 6.5, height = 6.5, units = "in")
-ggsave(here("figures", "brooks2015_proportions_full.pdf"),
-    width = 6.5, height = 6.5, units = "in", useDingbats = FALSE)
+ggsave(here("figures", "brooks-proportions.pdf"),
+    width = 7, height = 7, units = "in", useDingbats = FALSE)
 ```
 
 ## Main text 4-panel figure
@@ -525,38 +525,43 @@ range.top <- c(0, 1)
 # for y=x ref line
 ref_line = tibble(x = range.top[1], y = range.top[1], 
         xend = range.top[2], yend = range.top[2])
-# for formatting the x-axis labels in left panel
+# for (original) formatting the x-axis labels in left panel
 xtb <- tibble(labels = c("0", "1/7", "1/4", "1/3", "1/2", "1")) %>%
     rowwise() %>%
     mutate(breaks = eval(parse(text = labels)))
+# For setting the rangeframe axes to run from 0 to 1 instead of giving the data
+# range
+rftb <- tibble(Actual = c(0, 1), Observed = c(0, 1), Predicted = c(0, 1))
 # Panel A
 p.A <- ggplot(pred0, aes(Actual, Observed, color = Taxon)) +
     geom_segment(data=ref_line, aes(x=x, xend=xend, y=y, yend=yend), 
         colour="grey") +
     # geom_abline(slope = 1, intercept = 0, color = "grey") + 
     geom_quasirandom() +
-    # geom_jitter(width=0.02, height=0) +
-    geom_rangeframe(color = "black", sides = "bl") +
+    geom_rangeframe(data = rftb, color = "black") +
     scale_color_manual(values = colors.taxon, labels = tax_labeller) + 
     scale_x_continuous(limits = range.top,
         breaks = xtb$breaks, labels = xtb$labels) +
+    # scale_x_continuous(limits = range.top, 
+    #     breaks = c(0, 0.5, 1), labels = c("0", "0.5", "1")) +
     scale_y_continuous(limits = range.top, 
         breaks = c(0, 0.5, 1), labels = c("0", "0.5", "1")) +
     labs(x = "Actual", y = "Observed",
         title = "Observed proportion vs. actual") +
     base_theme
 # Panel B
-p.B <- ggplot(pred0, aes(Predicted, Observed, color = Taxon)) +
+p.B <- ggplot(pred0, aes(Predicted, Observed, 
+        color = fct_reorder(Taxon, -Observed))) +
     geom_segment(data=ref_line, aes(x=x, xend=xend, y=y, yend=yend), 
         colour="grey") +
     geom_point() +
-    geom_rangeframe(color = "black") +
+    geom_rangeframe(data = rftb, color = "black") +
     scale_color_manual(values = colors.taxon, labels = tax_labeller) + 
     scale_x_continuous(limits = range.top, 
         breaks = c(0, 0.5, 1), labels = c("0", "0.5", "1")) +
     scale_y_continuous(limits = range.top, 
         breaks = c(0, 0.5, 1), labels = c("0", "0.5", "1")) +
-    labs(x = "Model prediction", y = "Observed",
+    labs(x = "Model prediction", y = "Observed", color = "Taxon",
         title = "Observed proportion vs. model prediction") +
     base_theme
 ```
@@ -584,8 +589,7 @@ pred0.odds %>%
     {range(.$Observed / .$Actual)}
 range.bot <- c(0.02,33)
 # Panel C: Error in proportions (odds transformed)
-p.C <- 
-    ggplot(pred0.odds, aes(x = Taxon, y = Observed / Actual,
+p.C <- ggplot(pred0.odds, aes(x = Taxon, y = Observed / Actual,
             color = as.factor(Num_species))) +
     geom_hline(yintercept = 1) +
     geom_quasirandom() +
@@ -627,22 +631,22 @@ p.D <- ggplot(ratios0, aes(Pair, Error, color = as.factor(Num_species),
 ```
 
 Make the plot!
-```{r, fig.width = 6.5 * 4/3, fig.height = 5.5 * 4/3}
-l.A <- get_legend(p.A + theme(legend.position = "right"))
+```{r, fig.width = 8, fig.height = 6.75}
+l.A <- get_legend(p.B + theme(legend.position = "right"))
 l.D <- get_legend(p.D + theme(legend.position = "right"))
 
-row1 <- plot_grid(p.A, p.B, nrow = 1, labels = c("A", "B"), align = "hv") %>%
-    plot_grid(l.A, rel_widths = c(1, 0.1))
-row2 <- plot_grid(p.C, p.D, labels = c("C", "D"), align = "hv") %>%
-    plot_grid(l.D, rel_widths = c(1, 0.1))
+row1 <- plot_grid(p.A, p.B,
+    labels = c("A", "B"), align = "hv") %>%
+    plot_grid(l.A, rel_widths = c(1, 0.14))
+row2 <- plot_grid(p.C, p.D, 
+    labels = c("C", "D"), align = "hv") %>%
+    plot_grid(l.D, rel_widths = c(1, 0.14))
 plot_grid(row1, row2, ncol=1, rel_heights = c(1, 1.1))
 ```
 
 ```{r, include = FALSE, eval = SAVE_FIGURES}
-ggsave(here("figures", "brooks2015_4panel.pdf"),
-    width = 6.5, height = 5.5, units = "in", scale = 4/3, useDingbats = FALSE)
-ggsave(here("figures", "brooks2015_4panel.png"),
-    width = 6.5, height = 5.5, units = "in", scale = 4/3)
+ggsave(here("figures", "brooks-main.pdf"),
+    width = 8, height = 6.75, units = "in", useDingbats = FALSE)
 ```
 
 ## Fraction of squared Aitchison error due to bias
@@ -770,10 +774,11 @@ p.left <- bias_steps %>%
     scale_x_discrete(expand = xexpand,labels = labs.step) +
     geom_rangeframe(color = "black") +
     scale_color_manual(values = colors.taxon, labels = tax_labeller) + 
-    labs(x = "Step", y = "Efficiency / Gm. mean", 
+    labs(x = "Step", y = "Efficiency / gm. mean", 
         title = "Bias of each step") +
     guides(color = guide_legend(reverse = TRUE)) +
-    base_theme
+    base_theme +
+    theme(axis.text.x = element_text(size=8, family = ""))
 ## Right panel
 # Tibble for reference line
 ref.right <- tibble(Position = names(labs.position), Abundance = 1)
@@ -788,11 +793,12 @@ p.right <- ra_steps %>%
     scale_x_discrete(labels = labs.position, expand = xexpand) +
     geom_rangeframe(color = "black") +
     scale_color_manual(values = colors.taxon, labels = tax_labeller) + 
-    # labs(x = "Position in the workflow", y = "Abundance / Gm. mean", 
-    labs(x = "Biological substance", y = "Abundance / Gm. mean", 
+    # labs(x = "Position in the workflow", y = "Abundance / gm. mean", 
+    labs(x = "Biological substance", y = "Abundance / gm. mean", 
         title = "Composition through the workflow") +
     guides(color = guide_legend(reverse = TRUE)) +
-    base_theme
+    base_theme +
+    theme(axis.text.x = element_text(size=8, family = ""))
 l <- get_legend(p.right + theme(legend.position = c(0.45, 0.55), 
         plot.margin = margin(t=5, b=5)))
 ```
@@ -809,9 +815,7 @@ plot_grid(
 ```
 
 ```{r, include = FALSE, eval = SAVE_FIGURES}
-ggsave(here("figures", "brooks2015_bias_workflow.png"),
-    width = 8, height = 3, units = "in")
-ggsave(here("figures", "brooks2015_bias_workflow.pdf"),
+ggsave(here("figures", "brooks-workflow.pdf"),
     width = 8, height = 3, units = "in", useDingbats = FALSE)
 ```
 
@@ -886,7 +890,7 @@ mu <- mean(tb0$PCR)
 ```
 
 Supplemental figure plotting bias against copy number:
-```{r}
+```{r, fig.width = 6, fig.height = 3}
 p.pcr <- tb %>%
     mutate(Taxon.abbrev = tax_abbrev(Taxon)) %>%
     ggplot(aes(Copy_number / Genome_size, PCR, label = Taxon.abbrev)) +
@@ -915,10 +919,10 @@ plot_grid(p.pcr, p.tot, nrow = 1, labels = c("A", "B"), rel_widths = c(1, 1))
 ```
 
 ```{r, include = FALSE, eval = SAVE_FIGURES}
-ggsave(here("figures", "brooks2015_bias_vs_cn.pdf"),
+ggsave(here("figures", "brooks-cn.pdf"),
     width = 6, height = 3.0, units = "in", useDingbats = FALSE)
-ggsave(here("figures", "brooks2015_bias_vs_cn.png"),
-    width = 6, height = 3.0, units = "in")
+# ggsave(here("figures", "brooks2015_bias_vs_cn.png"),
+#     width = 6, height = 3.0, units = "in")
 ```
 
 ### Permutation tests
@@ -1314,10 +1318,10 @@ preds %>%
 ```
 
 ```{r, include = FALSE, eval = SAVE_FIGURES}
-ggsave(here("figures", "model_comparison.png"),
-    width = 6.5, height = 6.5, units = "in")
-ggsave(here("figures", "model_comparison.pdf"),
-    width = 6.5, height = 6.5, units = "in", useDingbats = FALSE)
+ggsave(here("figures", "brooks-model-comp.pdf"),
+    width = 7, height = 7, units = "in", useDingbats = FALSE)
+# ggsave(here("figures", "model_comparison.png"),
+#     width = 6.5, height = 6.5, units = "in")
 ```
 
 # Session info
