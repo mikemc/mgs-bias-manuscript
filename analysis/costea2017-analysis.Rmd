@@ -35,7 +35,7 @@ library(ggthemes)
 library(cowplot)
 library(ggbeeswarm)
 # Functions for bias estimation and calibration
-library(metacal)
+library(metacal); packageVersion("metacal")
 # This package
 devtools::load_all(here())
 ```
@@ -45,6 +45,7 @@ Plot setup:
 base_theme <- theme_tufte() + 
     theme(
         text = element_text(size=9, family = ""),
+        strip.text = element_text(size=9, family = ""),
         legend.position = "none"
         )
 tax_theme <- theme(
@@ -452,7 +453,11 @@ p.comp <- ggplot(comp,
         title = paste0("Composition of all bacteria")
         ) +
     base_theme +
-    theme(legend.position = "right", legend.key.size = unit(0.15, "in")) +
+    theme(legend.position = "right", legend.key.size = unit(0.11, "in"),
+        legend.margin = margin(5,5,5,-5)) + 
+    # theme(legend.position = c(1, 0.5), legend.justification = c(1, 0.5),
+    #     legend.key.size = unit(0.11, "in"),
+    #     ) +
     labs(fill = "Source or\nFamily (Native)")
 p.comp
 ```
@@ -500,7 +505,7 @@ stm <- sts %>%
 ```
 
 Plot the observed and actual relative abundances.
-```{r, fig.width = 5, fig.asp = 3/4}
+```{r, fig.width = 8, fig.asp = 3.4}
 p.step <- ggplot(sts,
     aes(x = factor(Taxon, c(mock$Taxon, "Contaminant")), y = Observed,
         color = Protocol, shape = (Individual == "M"))) + 
@@ -517,7 +522,7 @@ p.step <- ggplot(sts,
         shape = "Sample type") +
     base_theme + 
     tax_theme + 
-    theme(legend.position = "right")
+    theme(legend.position = "right", legend.margin = margin(5,0,5,-5))
 # Add the actual abundances (as a stair plot like in Costea2017's Figure 6)
 # underneath the data points
 tb.step <- mock0 %>%
@@ -543,17 +548,13 @@ p.step
 
 ## Main text Figure 3
 
-```{r, fig.width = 7, fig.height = 3.0}
+```{r, fig.width = 8, fig.height = 3.5}
 plot_grid(p.comp, p.step, labels = c("A", "B"))
 ```
 
 ```{r, include = FALSE, eval = SAVE_FIGURES}
-# ggsave(here("figures", "costea2017_2panel.svg"),
-#     width = 7, height = 3.5, units = "in", scale = 4/3)
-ggsave(here("figures", "costea2017_2panel.png"),
-    width = 7, height = 3.0, units = "in", dpi = 300, scale = 4/3)
-ggsave(here("figures", "costea2017_2panel.pdf"),
-    width = 7, height = 3.0, units = "in", scale = 4/3, useDingbats = FALSE)
+ggsave(here("figures", "costea-main.pdf"),
+    width = 8, height = 3.5, units = "in", useDingbats = FALSE)
 ```
 
 # Estimate bias
@@ -749,10 +750,8 @@ p1
 ```
 
 ```{r, include = FALSE, eval = SAVE_FIGURES}
-ggsave(here("figures", "costea2017_bias_estimates.png"),
-    width = 7, height = 3.5, units = "in", dpi = 300, scale = 4/3)
-ggsave(here("figures", "costea2017_bias_estimates.pdf"),
-    width = 7, height = 3.5, units = "in", scale = 4/3, useDingbats = FALSE)
+ggsave(here("figures", "costea-bias.pdf"),
+    width = 9, height = 4.2, units = "in", useDingbats = FALSE)
 ```
 
 Do this for differential bias as well. Note setting the denominator to just the
@@ -848,7 +847,7 @@ p.se <- ggplot(reps.H.summary, aes(N, gm_se,
     base_theme +
     scale_color_manual(values = values.color, labels = tax_labeller) +
     geom_rangeframe(color = "black") +
-    theme(legend.position = "right") +
+    theme(legend.position = "right", legend.margin = margin(5,10,5,-5)) +
     labs(x = "Number of controls", y = "Geometric standard error", 
         title = "Standard error vs. number of control samples", 
         color = "Taxon")
@@ -875,16 +874,14 @@ p.step.H <- p.step %+%
 # p.step.H
 ```
 
-```{r, fig.width = 8.5, fig.height = 4.5}
+```{r, fig.width = 8, fig.height = 3.5}
 plot_grid(p.se, p.step.H, nrow = 1, labels = c("A", "B"),
     rel_widths = c(1.3, 1))
 ```
 
 ```{r, include = FALSE, eval = SAVE_FIGURES}
-ggsave(here("figures", "costea2017_dispersion.png"),
-    width = 8.5, height = 4.5, units = "in")
-ggsave(here("figures", "costea2017_dispersion.pdf"),
-    width = 8.5, height = 4.5, units = "in", useDingbats = FALSE)
+ggsave(here("figures", "costea-dispersion.pdf"),
+    width = 8, height = 3.5, units = "in", useDingbats = FALSE)
 ```
 
 # Table with estimated bias and summary statistics
@@ -1037,11 +1034,10 @@ Estimate bias from the estimation samples:
 ```{r}
 bias_est <- stm0 %>%
     filter(Set == "Est") %>%
-    group_by(Protocol) %>%
-    nest %>%
-    mutate(Bias = map(data, estimate_bias, method = "center")) %>%
-    unnest(Bias) %>%
-    rename(Bias = Bias_est)
+    group_by(Protocol, Taxon) %>%
+    summarize(Bias = gm_mean(Error)) %>%
+    mutate(Bias = center_elts(Bias)) %>%
+    ungroup
 ```
 Compare the bias estimated from the estimation set and that from all specimens:
 ```{r}
@@ -1065,14 +1061,13 @@ stmW <- stm0 %>%
     select(Taxon, Protocol, Individual, Set, Observed) %>%
     spread(Protocol, Observed) %>%
     mutate(Actual = W) %>%
-    gather("Protocol", "Observed", H, Q, W)
+    gather("Protocol", "Observed", H, Q, W) %>%
+    mutate(Error = Observed / Actual)
 biasW_est <- stmW %>%
     filter(Set == "Est") %>%
-    group_by(Protocol) %>%
-    nest %>%
-    mutate(Bias = map(data, estimate_bias, method = "center")) %>%
-    unnest(Bias) %>%
-    rename(BiasW = Bias_est)
+    group_by(Protocol, Taxon) %>%
+    summarize(BiasW = gm_mean(Error)) %>%
+    mutate(BiasW = center_elts(BiasW))
 biasW_est %>%
     spread(Protocol, BiasW)
 ```
@@ -1185,7 +1180,7 @@ labtb <- tribble(
     -4,    1.5,   "H",
     -0.5,  1.3,   "Q",
     -1.85, -0.4,  "W",
-    2.4,    1.0,   "Actual"
+    2.3,    0.7,   "Actual"
     ) %>%
     mutate(Type = factor("Observed", type.lvls))
 p.pca <- p.pca +
@@ -1239,21 +1234,21 @@ p.step.cal$layers <- c(
 ## Main text figure
 
 ```{r, fig.width = 6.5, fig.height = 6.5}
-plot_grid(p.step.cal, 
+plot_grid(p.step.cal + theme(plot.margin = margin(5,20,5,5)),
     p.pca + 
         theme(legend.position = "bottom", legend.box = "vertical",
             legend.margin = margin(),
             legend.spacing = unit(0, "in"),
         ),
-    rel_widths = c(1, 1.2)
+    rel_widths = c(1, 1.1)
 )
 ```
 
 ```{r, include = FALSE, eval = SAVE_FIGURES}
-ggsave(here("figures", "costea2017_calibration.png"),
-    width = 6.5, height = 6.5, units = "in")
-ggsave(here("figures", "costea2017_calibration.pdf"),
-    width = 6.5, height = 6.5, units = "in", useDingbats = FALSE)
+# ggsave(here("figures", "costea-calibration.pdf"),
+#     width = 6.5, height = 6.5, units = "in", useDingbats = FALSE)
+ggsave(here("figures", "costea-calibration.pdf"),
+    width = 8, height = 8, units = "in", useDingbats = FALSE)
 ```
 
 # Bias vs. phylogeny
@@ -1295,8 +1290,9 @@ pr <- gtb %>%
     scale_y_discrete(labels = tax_labeller) +
     scale_x_log10(labels = log_formatter) +
     labs(y = "", x = "Differential efficiency rel. to Protocol W") +
-    theme(legend.position = "right",
-        plot.margin = margin(5, 5, 5, 0))
+    theme(legend.position = "right", plot.margin = margin(5, 5, 5, 0),
+        axis.text.y = element_text(size=9, family = "")
+    )
 ```
 
 ```{r, fig.width = 6, fig.height = 4}
@@ -1304,9 +1300,9 @@ plot_grid(gt, pr, align = "h", rel_widths = c(0.6, 1))
 ```
 
 ```{r}
-ggsave(here("figures", "costea2017_bias_tree.png"),
+ggsave(here("figures", "costea-tree.png"),
     width = 6, height = 4, units = "in", dpi=300)
-ggsave(here("figures", "costea2017_bias_tree.pdf"),
+ggsave(here("figures", "costea-tree.pdf"),
     width = 6, height = 4, units = "in", useDingbats = FALSE)
 ```
 
