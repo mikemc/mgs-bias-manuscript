@@ -2,7 +2,7 @@
 
 McLaren MR, Willis AD, Callahan BJ. 2019. Consistent and correctable bias in
 metagenomic sequencing measurements. bioRxiv 559831.
-https://www.biorxiv.org/content/10.1101/559831v1
+https://www.biorxiv.org/content/10.1101/559831v2
 
 ## This repository
 
