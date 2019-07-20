@@ -14,21 +14,31 @@ License: MIT + file LICENSE
 Encoding: UTF-8
 LazyData: false
 RoxygenNote: 6.1.1
+Depends: R (>= 3.6.0)
 Imports:
-    magrittr,
-    metacal,
-    tidyverse
-Suggests: 
+    metacal (== 0.1.0),
+    ape,
+    broom,
     cowplot,
     devtools,
     dotenv,
     here,
-    ggstance,
     ggthemes,
     ggbeeswarm,
+    ggrepel,
+    ggstance,
+    ggtree,
+    glue,
     gtools,
-    knitr,
+    janitor,
     kableExtra,
-    rmarkdown,
+    knitr,
+    magrittr,
+    RColorBrewer,
+    scales,
+    tidytree,
+    tidyverse,
     usethis
+Suggests: 
+    rmarkdown
 VignetteBuilder: knitr

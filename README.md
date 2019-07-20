@@ -20,8 +20,14 @@ Then, download this package from GitHub or by running
 git clone https://github.com/mikemc/mgs-bias-manuscript
 ```
 You can then `knit` or run the R-markdown documents in `analysis/`, which are
-described below. These documents include code to load this package with 
-`devtools::load_all()`, so you do not need to install this package itself. 
+described below. These documents include code to load this package with
+`devtools::load_all()`, so you do not need to install this package itself.
+Various other R packages are needed to run the code in the `analysis/`
+documents; these are listed in the "Imports" field of the `DESCRIPTION` file
+and can be installed all at once with
+```r
+devtools::install_deps("path/to/mgs-bias-manucript")
+```
 
 ## Data
 
