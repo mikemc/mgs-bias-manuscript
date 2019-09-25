@@ -7,7 +7,7 @@ Authors@R:
            role = c("aut", "cre"),
            email = "m.mclaren42@gmail.com")
 Description: Data and code to reproduce the analysis and figures for McLaren,
-    Willis, and Callahan (2019) [https://www.biorxiv.org/content/10.1101/559831v2].
+    Willis, and Callahan (2019) [https://doi.org/10.7554/eLife.46923].
 URL: https://github.com/mikemc/mgs-bias-manuscript
 BugReports: https://github.com/mikemc/mgs-bias-manuscript/issues
 License: MIT + file LICENSE
